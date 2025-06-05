@@ -36,6 +36,7 @@ static inline struct DiskInfo {
 struct Address {
   int address;
 
+  bool operator==(const Address&) const = default;
   static Address from_tree(int plate, int surface, int track, int sector) {
     return {plate +
             globalDiskInfo.plates *
