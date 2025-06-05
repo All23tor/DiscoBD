@@ -52,5 +52,8 @@ int main() {
   std::cout << "Número de sectores por bloque: " << globalDiskInfo.block_size
             << '\n';
 
-  load_csv("Titanic");
+  if (!load_csv("Titanic")) {
+    std::cerr << "Tabla Titanic ya existe" << '\n';
+    return 1;
+  }
 }

@@ -95,7 +95,7 @@ inline void read_disk_info() {
   ip::file_mapping first_file(first_path.c_str(), ip::mode_t::read_only);
   ip::mapped_region first_map(first_file, ip::mode_t::read_only);
   auto data = reinterpret_cast<char*>(first_map.get_address());
-  globalDiskInfo = reinterpret_cast<DiskInfo&>(data[0]);
+  globalDiskInfo = reinterpret_cast<DiskInfo&>(*data);
 }
 
 class CowBlock {

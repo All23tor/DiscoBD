@@ -54,16 +54,55 @@ static constexpr Address NullAddress = {-1};
 static constexpr std::size_t string_size = 16uz;
 
 using Columns = std::vector<std::pair<std::string, Type>>;
+struct Table {
+  std::array<char, 16> name;
+  Address sector;
+};
 
-static Address* write_header(const std::string& csv_name,
+static Address search_table(const std::string& table_name) {
+  auto first_data = CowBlock::load_sector({0}) + sizeof(DiskInfo);
+  auto tables = reinterpret_cast<const Table*>(first_data);
+  int table_idx = 0;
+
+  while (tables[table_idx].name[0] != '\0') {
+    auto& table = tables[table_idx++];
+    bool found = true;
+    for (int i = 0; i < table_name.size(); i++) {
+      if (table.name[i] != table_name[i]) {
+        found = false;
+        break;
+      }
+    }
+
+    if (found)
+      return table.sector;
+  }
+
+  return NullAddress;
+}
+
+static Address* write_header(const std::string& table_name,
                              const Columns& columns) {
-  auto header_path = fs::current_path() / "disk" / "p0" / "f0" / "t0" / "s1";
+  auto first_data = CowBlock::load_writeable_sector({0}) + sizeof(DiskInfo);
+  auto tables = reinterpret_cast<Table*>(first_data);
+  int table_idx = 0;
+
+  while (tables[table_idx].name[0] != '\0')
+    table_idx++;
+
+  auto& table = tables[table_idx];
+  for (int i = 0; i < table_name.size(); i++)
+    table.name[i] = table_name[i];
+  for (int i = table_name.size(); i < table.name.size(); i++)
+    table.name[i] = '\0';
+
   auto header_sector = request_empty_sector();
   auto header_data = CowBlock::load_writeable_sector(header_sector);
+  table.sector = header_sector;
 
-  for (char c : csv_name)
+  for (char c : table_name)
     *(header_data++) = c;
-  for (int i = csv_name.size(); i < string_size; i++)
+  for (int i = table_name.size(); i < string_size; i++)
     *(header_data++) = '\0';
 
   auto records_start = reinterpret_cast<Address*>(header_data);
@@ -86,7 +125,11 @@ static Address* write_header(const std::string& csv_name,
   return records_start;
 }
 
-inline void load_csv(const std::string& csv_name) {
+inline bool load_csv(const std::string& csv_name) {
+  bool already_exists = (search_table(csv_name) != NullAddress);
+  if (already_exists)
+    return false;
+
   std::ifstream file(csv_name + ".csv");
 
   std::string schema_str;
@@ -172,6 +215,9 @@ inline void load_csv(const std::string& csv_name) {
     }
     records_written++;
   }
+  return true;
 }
+
+void read_table(const std::string& table_name) {}
 
 #endif
