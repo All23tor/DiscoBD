@@ -1,8 +1,10 @@
-#include "csv.hpp"
 #include "disk.hpp"
+#include "table.hpp"
 
 #include <filesystem>
 #include <iostream>
+
+namespace fs = std::filesystem;
 
 int main() {
   if (!fs::exists(disk_path)) {

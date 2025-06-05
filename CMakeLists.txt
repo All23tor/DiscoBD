@@ -6,6 +6,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 find_package(Boost 1.82.0)
 if(Boost_FOUND)
-  add_executable(${PROJECT_NAME} main.cpp)
+  add_executable(${PROJECT_NAME} 
+    main.cpp
+    src/disk.cpp
+    src/table.cpp
+  )
   target_include_directories(${PROJECT_NAME} PRIVATE include ${Boost_INCLUDE_DIRS})
 endif()
