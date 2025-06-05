@@ -306,7 +306,7 @@ PassengerId#INT,Survived#INT,Pclass#INT,Name#STRING,Sex#STRING,Age#FLOAT,SibSp#I
 305,0,3,"Williams; Mr. Howard Hugh \"Harry\"",male,,0,0,A/5 2466,8.05,,S
 306,1,1,"Allison; Master. Hudson Trevor",male,0.92,1,2,113781,151.55,C22 C26,S
 307,1,1,"Fleming; Miss. Margaret",female,,0,0,17421,110.8833,,C
-308,1,1,"Penasco y Castellana; Mrs. Victor de Satode (Maria Josefa Perez de Soto y Vallejo)",female,17,1,0,PC 17758,108.9,C65,C
+308,1,1,"Penasco y Castellana; Mrs. Victor de Satode",female,17,1,0,PC 17758,108.9,C65,C
 309,0,2,"Abelson; Mr. Samuel",male,30,1,0,P/PP 3381,24,,C
 310,1,1,"Francatelli; Miss. Laura Mabel",female,30,0,0,PC 17485,56.9292,E36,C
 311,1,1,"Hays; Miss. Margaret Bechstein",female,24,0,0,11767,83.1583,C54,C
@@ -426,7 +426,7 @@ PassengerId#INT,Survived#INT,Pclass#INT,Name#STRING,Sex#STRING,Age#FLOAT,SibSp#I
 425,0,3,"Rosblom; Mr. Viktor Richard",male,18,1,1,370129,20.2125,,S
 426,0,3,"Wiseman; Mr. Phillippe",male,,0,0,A/4. 34244,7.25,,S
 427,1,2,"Clarke; Mrs. Charles V (Ada Maria Winfield)",female,28,1,0,2003,26,,S
-428,1,2,"Phillips; Miss. Kate Florence (\"Mrs Kate Louise Phillips Marshall\")",female,19,0,0,250655,26,,S
+428,1,2,"Phillips; Miss. Kate Florence",female,19,0,0,250655,26,,S
 429,0,3,"Flynn; Mr. James",male,,0,0,364851,7.75,,Q
 430,1,3,"Pickard; Mr. Berk (Berk Trembisky)",male,32,0,0,SOTON/O.Q. 392078,8.05,E10,S
 431,1,1,"Bjornstrom-Steffansson; Mr. Mauritz Hakan",male,28,0,0,110564,26.55,C52,S
@@ -555,7 +555,7 @@ PassengerId#INT,Survived#INT,Pclass#INT,Name#STRING,Sex#STRING,Age#FLOAT,SibSp#I
 554,1,3,"Leeni; Mr. Fahim (\"Philip Zenni\")",male,22,0,0,2620,7.225,,C
 555,1,3,"Ohman; Miss. Velin",female,22,0,0,347085,7.775,,S
 556,0,1,"Wright; Mr. George",male,62,0,0,113807,26.55,,S
-557,1,1,"Duff Gordon; Lady. (Lucille Christiana Sutherland) (\"Mrs Morgan\")",female,48,1,0,11755,39.6,A16,C
+557,1,1,"Duff Gordon; Lady. (Lucille Christiana Sutherland)",female,48,1,0,11755,39.6,A16,C
 558,0,1,"Robbins; Mr. Victor",male,,0,0,PC 17757,227.525,,C
 559,1,1,"Taussig; Mrs. Emil (Tillie Mandelbaum)",female,39,1,1,110413,79.65,E67,S
 560,1,3,"de Messemaeker; Mrs. Guillaume Joseph (Emma)",female,36,1,0,345572,17.4,,S

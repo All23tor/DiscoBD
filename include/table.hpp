@@ -2,6 +2,7 @@
 #define CSV_HPP
 
 #include "disk.hpp"
+#include "interpreter.hpp"
 #include "type.hpp"
 
 #include <cstdint>
@@ -9,7 +10,15 @@
 #include <utility>
 #include <vector>
 
-inline Address request_empty_sector() {
+struct Table {
+  Db::SmallString name;
+  Address sector;
+};
+
+namespace {
+static constexpr Address NullAddress = {-1};
+
+Address request_empty_sector() {
   int total_sectors = globalDiskInfo.plates * 2 * globalDiskInfo.tracks *
                       globalDiskInfo.sectors;
   int total_blocks = total_sectors / globalDiskInfo.block_size;
@@ -25,20 +34,7 @@ inline Address request_empty_sector() {
   throw std::bad_alloc();
 }
 
-static constexpr Address NullAddress = {-1};
-using SmallString = std::array<char, 16>;
-
-struct Column {
-  SmallString name;
-  Db::Type type;
-};
-
-struct Table {
-  SmallString name;
-  Address sector;
-};
-
-static Address search_table(const std::string& table_name) {
+Address search_table(const std::string& table_name) {
   auto first_data = CowBlock::load_sector({0}) + sizeof(DiskInfo);
   auto tables = reinterpret_cast<const Table*>(first_data);
   int table_idx = 0;
@@ -60,8 +56,8 @@ static Address search_table(const std::string& table_name) {
   return NullAddress;
 }
 
-static Address* write_header(const std::string& table_name,
-                             const std::vector<Column>& columns) {
+Address* write_header(const std::string& table_name,
+                      const std::vector<Db::Column>& columns) {
   auto first_data = CowBlock::load_writeable_sector({0}) + sizeof(DiskInfo);
   auto tables = reinterpret_cast<Table*>(first_data);
   int table_idx = 0;
@@ -93,6 +89,7 @@ static Address* write_header(const std::string& table_name,
 
   return records_start;
 }
+} // namespace
 
 inline bool load_csv(const std::string& csv_name) {
   bool already_exists = (search_table(csv_name) != NullAddress);
@@ -106,13 +103,14 @@ inline bool load_csv(const std::string& csv_name) {
   std::stringstream schema(std::move(schema_str));
 
   std::size_t record_size = 0;
-  std::vector<Column> columns;
+  std::vector<Db::Column> columns;
   std::string line;
   while (std::getline(schema, line, ',')) {
     std::stringstream ss(std::move(line));
-    Column column;
+    Db::Column column;
     std::string name;
     std::getline(ss, name, '#');
+    name.resize(sizeof(Db::SmallString));
     ss >> column.type;
     for (int i = 0; i < name.size(); i++)
       column.name[i] = name[i];
@@ -125,22 +123,26 @@ inline bool load_csv(const std::string& csv_name) {
   auto records_start = write_header(csv_name, columns);
 
   int recods_per_sector =
-      (globalDiskInfo.bytes - sizeof(Address)) / record_size;
+      (globalDiskInfo.bytes - sizeof(Address) - sizeof(int)) / record_size;
   *records_start = request_empty_sector();
   auto record_data = CowBlock::load_writeable_sector(*records_start);
   auto next_sector = reinterpret_cast<Address*>(record_data);
-  *next_sector = NullAddress;
   record_data += sizeof(Address);
+  auto record_count = reinterpret_cast<int*>(record_data);
+  record_data += sizeof(int);
+  *next_sector = NullAddress;
+  *record_count = 0;
 
-  int records_written = 0;
   while (std::getline(file, line)) {
-    if (records_written == recods_per_sector) {
-      records_written = 0;
+    if (*record_count == recods_per_sector) {
       *next_sector = request_empty_sector();
       record_data = CowBlock::load_writeable_sector(*next_sector);
       next_sector = reinterpret_cast<Address*>(record_data);
-      *next_sector = NullAddress;
       record_data += sizeof(Address);
+      record_count = reinterpret_cast<int*>(record_data);
+      record_data += sizeof(int);
+      *next_sector = NullAddress;
+      *record_count = 0;
     }
 
     std::stringstream ss(std::move(line));
@@ -186,35 +188,12 @@ inline bool load_csv(const std::string& csv_name) {
       }
       }
     }
-    records_written++;
+    (*record_count)++;
   }
   return true;
 }
 
-template <class Visitor, Db::Type Type = Db::Type::Int>
-auto visit_type(const void* pointer, Db::Type type, Visitor&& v) {
-  if (type == Type) {
-    using Pointer = const Db::Value::fromType<Type>*;
-    return v(*reinterpret_cast<Pointer>(pointer));
-  } else if constexpr (Type != Db::Type::String) {
-    constexpr auto Next = static_cast<Db::Type>(std::to_underlying(Type) + 1);
-    return visit_type<Visitor, Next>(pointer, type, v);
-  } else
-    throw std::bad_variant_access();
-}
-
-template <class Visitor>
-auto visit_field(const char* record, std::size_t index, const Column* columns,
-                 Visitor&& v) {
-  std::ptrdiff_t offset = 0;
-  for (int idx = 0; idx < index; idx++)
-    offset += size_of_type(columns[idx].type);
-  Db::Type type = columns[index].type;
-  auto field = record + offset;
-  return visit_type(field, type, v);
-}
-
-inline void read_table(const std::string& table_name) {
+inline void select_all(const std::string& table_name) {
   auto header_sector = search_table(table_name);
   if (header_sector == NullAddress) {
     std::cerr << "Tabla " << table_name << " no existe\n";
@@ -223,26 +202,23 @@ inline void read_table(const std::string& table_name) {
   auto header_data = CowBlock::load_sector(header_sector);
   auto records_adress = reinterpret_cast<const Address&>(*header_data);
   header_data += sizeof(Address);
-  if (records_adress == NullAddress)
-    return;
 
   int column_size = reinterpret_cast<const int&>(*header_data);
   header_data += sizeof(column_size);
 
-  auto columns = reinterpret_cast<const Column*>(header_data);
+  auto columns = reinterpret_cast<const Db::Column*>(header_data);
   auto record_size = 0uz;
   for (auto idx = 0uz; idx < column_size; idx++)
     record_size += Db::size_of_type(columns[idx].type);
-
-  int recods_per_sector =
-      (globalDiskInfo.bytes - sizeof(Address)) / record_size;
 
   while (records_adress != NullAddress) {
     auto records_data = CowBlock::load_sector(records_adress);
     auto next_adress = reinterpret_cast<const Address&>(*records_data);
     records_data += sizeof(Address);
+    auto record_count = reinterpret_cast<const int&>(*records_data);
+    records_data += sizeof(int);
 
-    for (auto record_idx = 0uz; record_idx < recods_per_sector; record_idx++) {
+    for (auto record_idx = 0uz; record_idx < record_count; record_idx++) {
       for (auto column_idx = 0uz; column_idx < column_size; column_idx++) {
         if (column_idx != 0)
           std::cout << '#';
@@ -261,4 +237,56 @@ inline void read_table(const std::string& table_name) {
   }
 }
 
+inline void select_all_where(const std::string& table_name,
+                             const std::string& expression) {
+  auto header_sector = search_table(table_name);
+  if (header_sector == NullAddress) {
+    std::cerr << "Tabla " << table_name << " no existe\n";
+    return;
+  }
+  auto header_data = CowBlock::load_sector(header_sector);
+  auto records_adress = reinterpret_cast<const Address&>(*header_data);
+  header_data += sizeof(Address);
+  int column_size = reinterpret_cast<const int&>(*header_data);
+  header_data += sizeof(column_size);
+
+  auto columns = reinterpret_cast<const Db::Column*>(header_data);
+  auto record_size = 0uz;
+  for (auto idx = 0uz; idx < column_size; idx++)
+    record_size += Db::size_of_type(columns[idx].type);
+
+  auto tree = parseExpression(expression, columns, column_size);
+  while (records_adress != NullAddress) {
+    auto records_data = CowBlock::load_sector(records_adress);
+    auto next_adress = reinterpret_cast<const Address&>(*records_data);
+    records_data += sizeof(Address);
+    auto record_count = reinterpret_cast<const int&>(*records_data);
+    records_data += sizeof(int);
+
+    for (auto record_idx = 0uz; record_idx < record_count; record_idx++) {
+      bool selected;
+      selected = tree->evaluate(records_data, columns).get<Db::Type::Bool>();
+
+      if (!selected) {
+        records_data += record_size;
+        continue;
+      }
+
+      for (auto column_idx = 0uz; column_idx < column_size; column_idx++) {
+        if (column_idx != 0)
+          std::cout << '#';
+        visit_field(records_data, column_idx, columns, [](auto&& arg) {
+          if constexpr (requires { std::cout << arg; })
+            std::cout << arg;
+          else
+            std::cout << arg.data();
+        });
+      }
+      std::cout << '\n';
+      records_data += record_size;
+    }
+
+    records_adress = next_adress;
+  }
+}
 #endif

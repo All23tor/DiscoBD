@@ -1,8 +1,4 @@
-#include "disk.hpp"
 #include "table.hpp"
-
-#include <filesystem>
-#include <iostream>
 
 int main() {
   if (!fs::exists(disk_path)) {
@@ -43,6 +39,7 @@ int main() {
     read_disk_info();
   }
 
+  std::cout << '\n';
   std::cout << "Información del disco:\n";
   std::cout << "Número de platos: " << globalDiskInfo.plates << '\n';
   std::cout << "Número de pistas por plato: " << globalDiskInfo.tracks << '\n';
@@ -50,11 +47,12 @@ int main() {
             << '\n';
   std::cout << "Número de bytes por sector: " << globalDiskInfo.bytes << '\n';
   std::cout << "Número de sectores por bloque: " << globalDiskInfo.block_size
+            << '\n'
             << '\n';
 
   if (!load_csv("Titanic")) {
     std::cerr << "Tabla Titanic ya existe" << '\n';
   }
 
-  read_table("Titanic");
+  select_all("Titanic");
 }

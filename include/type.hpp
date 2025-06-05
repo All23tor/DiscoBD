@@ -22,11 +22,16 @@ Variant runtimeVariant(std::size_t idx) {
 }
 } // namespace
 
+using SmallString = std::array<char, 16>;
 enum class Type : std::size_t {
   Int,
   Float,
   Bool,
   String,
+};
+struct Column {
+  SmallString name;
+  Type type;
 };
 
 inline std::istream& operator>>(std::istream& is, Db::Type& type) {
@@ -38,6 +43,12 @@ inline std::istream& operator>>(std::istream& is, Db::Type& type) {
 
   std::string name;
   std::getline(is, name, ' ');
+  name.erase(std::find_if(name.rbegin(), name.rend(),
+                          [](unsigned char ch) {
+                            return !std::isspace(ch);
+                          })
+                 .base(),
+             name.end());
   type = typeNames.at(name);
   return is;
 }
@@ -77,6 +88,29 @@ std::size_t size_of_type(Db::Type type) {
     return size_of_type<Next>(type);
   } else
     return 0;
+}
+
+template <class Visitor, Db::Type Type = Db::Type::Int>
+auto visit_type(const void* pointer, Db::Type type, Visitor&& v) {
+  if (type == Type) {
+    using Pointer = const Db::Value::fromType<Type>*;
+    return v(*reinterpret_cast<Pointer>(pointer));
+  } else if constexpr (Type != Db::Type::String) {
+    constexpr auto Next = static_cast<Db::Type>(std::to_underlying(Type) + 1);
+    return visit_type<Visitor, Next>(pointer, type, v);
+  } else
+    throw std::bad_variant_access();
+}
+
+template <class Visitor>
+auto visit_field(const char* record, std::size_t index, const Column* columns,
+                 Visitor&& v) {
+  std::ptrdiff_t offset = 0;
+  for (int idx = 0; idx < index; idx++)
+    offset += size_of_type(columns[idx].type);
+  Db::Type type = columns[index].type;
+  auto field = record + offset;
+  return visit_type(field, type, v);
 }
 } // namespace Db
 

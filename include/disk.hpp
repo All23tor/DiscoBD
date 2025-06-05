@@ -7,6 +7,7 @@
 #include <array>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <set>
 #include <tuple>
 
@@ -62,19 +63,24 @@ struct Address {
 
 inline void make_disk(const DiskInfo& diskInfo) {
   fs::create_directory(disk_path);
+  std::cout << disk_path << '\n';
   for (int plate = 0; plate < diskInfo.plates; plate++) {
     fs::path plate_path = disk_path / ("p" + std::to_string(plate));
     fs::create_directory(plate_path);
+    std::cout << "╚═ " << plate_path << '\n';
     for (int surface = 0; surface < 2; surface++) {
       fs::path surface_path = plate_path / ("f" + std::to_string(surface));
       fs::create_directory(surface_path);
+      std::cout << "   ╚═ " << surface_path << '\n';
       for (int track = 0; track < diskInfo.tracks; track++) {
         fs::path track_path = surface_path / ("t" + std::to_string(track));
         fs::create_directory(track_path);
+        std::cout << "      ╚═ " << track_path << '\n';
         for (int sector = 0; sector < diskInfo.sectors; sector++) {
           fs::path sector_path = track_path / ("s" + std::to_string(sector));
           std::ofstream sector_file = sector_path;
           fs::resize_file(sector_path, diskInfo.bytes);
+          std::cout << "         ╚═ " << sector_path << '\n';
         }
       }
     }
