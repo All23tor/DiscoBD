@@ -224,9 +224,9 @@ inline void read_table(const std::string& table_name) {
     return;
   }
   auto header_data = CowBlock::load_sector(header_sector);
-  auto records_data = reinterpret_cast<const Address&>(*header_data);
+  auto records_adress = reinterpret_cast<const Address&>(*header_data);
   header_data += sizeof(Address);
-  if (records_data == NullAddress)
+  if (records_adress == NullAddress)
     return;
 
   int column_size = reinterpret_cast<const int&>(*header_data);
@@ -239,6 +239,19 @@ inline void read_table(const std::string& table_name) {
 
   int recods_per_sector =
       (globalDiskInfo.bytes - sizeof(Address)) / record_size;
+
+  while (records_adress != NullAddress) {
+    auto records_data = CowBlock::load_sector(records_adress);
+    auto next_adress = reinterpret_cast<const Address&>(records_data);
+    records_data += sizeof(Address);
+
+    for (auto record_idx = 0uz; record_idx < recods_per_sector; record_idx++) {
+      for (auto column_idx = 0uz; column_idx < column_size; column_idx++) {}
+      records_data += record_size;
+    }
+
+    records_adress = next_adress;
+  }
 }
 
 #endif
