@@ -2,38 +2,12 @@
 #define CSV_HPP
 
 #include "disk.hpp"
+#include "type.hpp"
 
 #include <cstdint>
 #include <iostream>
-#include <map>
 #include <utility>
 #include <vector>
-
-enum class Type : std::size_t {
-  Int,
-  Float,
-  Bool,
-  String,
-};
-
-static const std::map<Type, std::size_t> typeSizes = {
-    {Type::Int, sizeof(std::int64_t)},
-    {Type::Float, sizeof(double)},
-    {Type::Bool, sizeof(bool)},
-    {Type::String, sizeof(std::array<char, 64>)}};
-
-inline std::istream& operator>>(std::istream& is, Type& type) {
-  static const std::map<std::string, Type> typeNames = {
-      {"INT", Type::Int},
-      {"FLOAT", Type::Float},
-      {"BOOL", Type::Bool},
-      {"STRING", Type::String}};
-
-  std::string name;
-  std::getline(is, name, ' ');
-  type = typeNames.at(name);
-  return is;
-}
 
 inline Address request_empty_sector() {
   int total_sectors = globalDiskInfo.plates * 2 * globalDiskInfo.tracks *
@@ -56,7 +30,7 @@ using SmallString = std::array<char, 16>;
 
 struct Column {
   SmallString name;
-  Type type;
+  Db::Type type;
 };
 
 struct Table {
@@ -144,7 +118,7 @@ inline bool load_csv(const std::string& csv_name) {
       column.name[i] = name[i];
     for (int i = name.size(); i < column.name.size(); i++)
       column.name[i] = '\0';
-    record_size += typeSizes.at(column.type);
+    record_size += Db::size_of_type(column.type);
     columns.push_back(std::move(column));
   }
 
@@ -173,7 +147,7 @@ inline bool load_csv(const std::string& csv_name) {
     for (auto& [name, type] : columns) {
       std::string field;
       switch (type) {
-      case Type::Int: {
+      case Db::Type::Int: {
         std::getline(ss, field, ',');
         if (field.empty())
           field = "0";
@@ -182,7 +156,7 @@ inline bool load_csv(const std::string& csv_name) {
           *(record_data++) = c;
         break;
       }
-      case Type::Float: {
+      case Db::Type::Float: {
         std::getline(ss, field, ',');
         if (field.empty())
           field = "0";
@@ -191,7 +165,7 @@ inline bool load_csv(const std::string& csv_name) {
           *(record_data++) = c;
         break;
       }
-      case Type::Bool: {
+      case Db::Type::Bool: {
         std::getline(ss, field, ',');
         if (field == "yes")
           *(record_data++) = 1;
@@ -199,14 +173,14 @@ inline bool load_csv(const std::string& csv_name) {
           *(record_data++) = 0;
         break;
       }
-      case Type::String: {
+      case Db::Type::String: {
         if (ss.peek() == '"')
           ss >> std::quoted(field), ss.ignore(1);
         else
           std::getline(ss, field, ',');
         for (char c : field)
           *(record_data++) = c;
-        for (int i = field.size(); i < typeSizes.at(Type::String); i++)
+        for (int i = field.size(); i < Db::size_of_type(Db::Type::String); i++)
           *(record_data++) = '\0';
         break;
       }
@@ -215,6 +189,29 @@ inline bool load_csv(const std::string& csv_name) {
     records_written++;
   }
   return true;
+}
+
+template <class Visitor, Db::Type Type = Db::Type::Int>
+auto visit_type(const void* pointer, Db::Type type, Visitor&& v) {
+  if (type == Type) {
+    using Pointer = const Db::Value::fromType<Type>*;
+    return v(*reinterpret_cast<Pointer>(pointer));
+  } else if constexpr (Type != Db::Type::String) {
+    constexpr auto Next = static_cast<Db::Type>(std::to_underlying(Type) + 1);
+    return visit_type<Visitor, Next>(pointer, type, v);
+  } else
+    throw std::bad_variant_access();
+}
+
+template <class Visitor>
+auto visit_field(const char* record, std::size_t index, const Column* columns,
+                 Visitor&& v) {
+  std::ptrdiff_t offset = 0;
+  for (int idx = 0; idx < index; idx++)
+    offset += size_of_type(columns[idx].type);
+  Db::Type type = columns[index].type;
+  auto field = record + offset;
+  return visit_type(field, type, v);
 }
 
 inline void read_table(const std::string& table_name) {
@@ -235,7 +232,7 @@ inline void read_table(const std::string& table_name) {
   auto columns = reinterpret_cast<const Column*>(header_data);
   auto record_size = 0uz;
   for (auto idx = 0uz; idx < column_size; idx++)
-    record_size += typeSizes.at(columns[idx].type);
+    record_size += Db::size_of_type(columns[idx].type);
 
   int recods_per_sector =
       (globalDiskInfo.bytes - sizeof(Address)) / record_size;
@@ -246,7 +243,17 @@ inline void read_table(const std::string& table_name) {
     records_data += sizeof(Address);
 
     for (auto record_idx = 0uz; record_idx < recods_per_sector; record_idx++) {
-      for (auto column_idx = 0uz; column_idx < column_size; column_idx++) {}
+      for (auto column_idx = 0uz; column_idx < column_size; column_idx++) {
+        if (column_idx != 0)
+          std::cout << '#';
+        visit_field(records_data, column_idx, columns, [](auto&& arg) {
+          if constexpr (requires { std::cout << arg; })
+            std::cout << arg;
+          else
+            std::cout << arg.data();
+        });
+      }
+      std::cout << '\n';
       records_data += record_size;
     }
 
