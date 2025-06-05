@@ -242,7 +242,7 @@ inline void read_table(const std::string& table_name) {
 
   while (records_adress != NullAddress) {
     auto records_data = CowBlock::load_sector(records_adress);
-    auto next_adress = reinterpret_cast<const Address&>(records_data);
+    auto next_adress = reinterpret_cast<const Address&>(*records_data);
     records_data += sizeof(Address);
 
     for (auto record_idx = 0uz; record_idx < recods_per_sector; record_idx++) {
