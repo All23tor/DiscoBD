@@ -106,14 +106,15 @@ inline void read_disk_info() {
 
 class CowBlock {
   mutable int written = false;
-  int block_idx;
   ip::mapped_region block_map;
 
   static inline std::set<CowBlock, std::less<>> loaded_blocks;
 
-  CowBlock(const int block_idx) : block_idx(block_idx) {
+  CowBlock(const int block_idx) {
     auto block_path = blocks_path / ("b" + std::to_string(block_idx));
     std::ofstream block_stream = block_path;
+    for (char c : pun_cast(block_idx))
+      block_stream.put(c);
 
     for (int sector = 0; sector < globalDiskInfo.block_size; sector++) {
       Address sector_address = {block_idx * globalDiskInfo.block_size + sector};
@@ -153,18 +154,19 @@ public:
   }
 
   const char* data() const {
-    return reinterpret_cast<const char*>(block_map.get_address());
+    return reinterpret_cast<const char*>(block_map.get_address()) + sizeof(int);
   }
 
   char* writeable_data() const {
     written = true;
-    return reinterpret_cast<char*>(block_map.get_address());
+    return reinterpret_cast<char*>(block_map.get_address()) + sizeof(int);
   }
 
   ~CowBlock() {
     if (!written)
       return;
 
+    int block_idx = *reinterpret_cast<const int*>((data() - sizeof(int)));
     for (int sector = 0; sector < globalDiskInfo.block_size; sector++) {
       auto sector_data = data() + sector * globalDiskInfo.bytes;
       Address sector_address = {block_idx * globalDiskInfo.block_size + sector};
@@ -175,13 +177,20 @@ public:
   }
 
   friend bool operator<(const CowBlock& lhs, const CowBlock& rhs) {
-    return lhs.block_idx < rhs.block_idx;
+    int lhsblock_idx =
+        *reinterpret_cast<const int*>((lhs.data() - sizeof(int)));
+    int rhsblock_idx =
+        *reinterpret_cast<const int*>((rhs.data() - sizeof(int)));
+    return lhsblock_idx < rhsblock_idx;
   }
+
   friend bool operator<(const CowBlock& block, int idx) {
-    return block.block_idx < idx;
+    int block_idx = *reinterpret_cast<const int*>((block.data() - sizeof(int)));
+    return block_idx < idx;
   }
   friend bool operator<(int idx, const CowBlock& block) {
-    return idx < block.block_idx;
+    int block_idx = *reinterpret_cast<const int*>((block.data() - sizeof(int)));
+    return idx < block_idx;
   }
 };
 
