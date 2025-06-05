@@ -1,4 +1,5 @@
 #include "table.hpp"
+#include <sstream>
 
 int main() {
   if (!fs::exists(disk_path)) {
@@ -50,9 +51,45 @@ int main() {
             << '\n'
             << '\n';
 
-  if (!load_csv("Titanic")) {
-    std::cerr << "Tabla Titanic ya existe" << '\n';
-  }
+  std::cout << "  > ";
+  std::string line;
+  while (std::getline(std::cin, line)) {
+    std::stringstream ss{std::move(line)};
+    std::string word;
+    ss >> word;
+    if (word == "LOAD") {
+      std::string name;
+      ss >> name;
+      if (load_csv(name))
+        std::cout << "\tSe cargó la tabla " << name << " exitosamente\n";
+      else
+        std::cout << "\tLa tabla " << name
+                  << " no se pudo cargar o ya existe\n";
+    } else if (word == "SELECT") {
+      std::string fields;
+      ss >> fields;
+      if (fields == "*") {
+        std::string FROM;
+        ss >> FROM;
+        if (FROM == "FROM") {
+          std::string table_name;
+          ss >> table_name;
 
-  select_all("Titanic");
+          std::string WHERE;
+          ss >> WHERE;
+          if (WHERE == "WHERE") {
+            std::string clause;
+            std::getline(ss, clause, '\n');
+            select_all_where(table_name, clause);
+          } else {
+            select_all(table_name);
+          }
+        }
+      }
+    } else if (word == "INFO") {
+      disk_info();
+    }
+    std::cout << "  > ";
+  }
+  std::cout << std::endl;
 }

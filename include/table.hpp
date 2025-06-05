@@ -34,6 +34,37 @@ Address request_empty_sector() {
   throw std::bad_alloc();
 }
 
+void disk_info() {
+  auto total_bytes = globalDiskInfo.plates * 2 * globalDiskInfo.tracks *
+                     globalDiskInfo.sectors * globalDiskInfo.bytes;
+  std::cout << "Capacidad total del disco: " << total_bytes << " bytes \n";
+
+  int sectors_available = 0;
+  std::cout << "Sectores disponibles:\n";
+  int total_sectors = globalDiskInfo.plates * 2 * globalDiskInfo.tracks *
+                      globalDiskInfo.sectors;
+  int total_blocks = total_sectors / globalDiskInfo.block_size;
+  for (int block_idx = 0; block_idx < total_blocks; block_idx++) {
+    for (int s_offset = 0; s_offset < globalDiskInfo.block_size; s_offset++) {
+      Address address = {block_idx * globalDiskInfo.block_size + s_offset};
+      auto data = CowBlock::load_sector(address);
+      int data_begin = reinterpret_cast<const int&>(*data);
+      if (data_begin == 0) {
+        sectors_available++;
+        std::cout << address.to_path().string() << '\n';
+      }
+    }
+  }
+  std::cout << "En total hay " << sectors_available
+            << " sectores disponibles\n";
+  std::cout << "En total hay " << total_sectors - sectors_available
+            << " sectores ocupados\n";
+  int free_bytes = sectors_available * globalDiskInfo.bytes;
+  std::cout << "El disco tiene " << free_bytes << " bytes disponibles\n";
+  std::cout << "El disco tiene " << total_bytes - free_bytes
+            << " bytes ocupados\n";
+}
+
 Address search_table(const std::string& table_name) {
   auto first_data = CowBlock::load_sector({0}) + sizeof(DiskInfo);
   auto tables = reinterpret_cast<const Table*>(first_data);
@@ -97,6 +128,8 @@ inline bool load_csv(const std::string& csv_name) {
     return false;
 
   std::ifstream file(csv_name + ".csv");
+  if (!file)
+    return false;
 
   std::string schema_str;
   std::getline(file, schema_str);
