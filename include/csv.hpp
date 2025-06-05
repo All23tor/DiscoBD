@@ -4,6 +4,7 @@
 #include "disk.hpp"
 
 #include <cstdint>
+#include <iostream>
 #include <map>
 #include <utility>
 #include <vector>
@@ -51,11 +52,15 @@ inline Address request_empty_sector() {
 }
 
 static constexpr Address NullAddress = {-1};
-static constexpr std::size_t string_size = 16uz;
+using SmallString = std::array<char, 16>;
 
-using Columns = std::vector<std::pair<std::string, Type>>;
+struct Column {
+  SmallString name;
+  Type type;
+};
+
 struct Table {
-  std::array<char, 16> name;
+  SmallString name;
   Address sector;
 };
 
@@ -82,7 +87,7 @@ static Address search_table(const std::string& table_name) {
 }
 
 static Address* write_header(const std::string& table_name,
-                             const Columns& columns) {
+                             const std::vector<Column>& columns) {
   auto first_data = CowBlock::load_writeable_sector({0}) + sizeof(DiskInfo);
   auto tables = reinterpret_cast<Table*>(first_data);
   int table_idx = 0;
@@ -100,11 +105,6 @@ static Address* write_header(const std::string& table_name,
   auto header_data = CowBlock::load_writeable_sector(header_sector);
   table.sector = header_sector;
 
-  for (char c : table_name)
-    *(header_data++) = c;
-  for (int i = table_name.size(); i < string_size; i++)
-    *(header_data++) = '\0';
-
   auto records_start = reinterpret_cast<Address*>(header_data);
   *records_start = NullAddress;
   header_data += sizeof(Address);
@@ -113,14 +113,9 @@ static Address* write_header(const std::string& table_name,
   for (char c : pun_cast(column_size))
     *(header_data++) = c;
 
-  for (auto& [name, type] : columns) {
-    for (char c : pun_cast(type))
+  for (auto& column : columns)
+    for (char c : pun_cast(column))
       *(header_data++) = c;
-    for (char c : name)
-      *(header_data++) = c;
-    for (int i = name.size(); i < string_size; i++)
-      *(header_data++) = '\0';
-  }
 
   return records_start;
 }
@@ -137,16 +132,20 @@ inline bool load_csv(const std::string& csv_name) {
   std::stringstream schema(std::move(schema_str));
 
   std::size_t record_size = 0;
-  Columns columns;
+  std::vector<Column> columns;
   std::string line;
   while (std::getline(schema, line, ',')) {
     std::stringstream ss(std::move(line));
-    Type type;
+    Column column;
     std::string name;
     std::getline(ss, name, '#');
-    ss >> type;
-    columns.push_back({name, type});
-    record_size += typeSizes.at(type);
+    ss >> column.type;
+    for (int i = 0; i < name.size(); i++)
+      column.name[i] = name[i];
+    for (int i = name.size(); i < column.name.size(); i++)
+      column.name[i] = '\0';
+    record_size += typeSizes.at(column.type);
+    columns.push_back(std::move(column));
   }
 
   auto records_start = write_header(csv_name, columns);
@@ -218,6 +217,28 @@ inline bool load_csv(const std::string& csv_name) {
   return true;
 }
 
-void read_table(const std::string& table_name) {}
+inline void read_table(const std::string& table_name) {
+  auto header_sector = search_table(table_name);
+  if (header_sector == NullAddress) {
+    std::cerr << "Tabla " << table_name << " no existe\n";
+    return;
+  }
+  auto header_data = CowBlock::load_sector(header_sector);
+  auto records_data = reinterpret_cast<const Address&>(*header_data);
+  header_data += sizeof(Address);
+  if (records_data == NullAddress)
+    return;
+
+  int column_size = reinterpret_cast<const int&>(*header_data);
+  header_data += sizeof(column_size);
+
+  auto columns = reinterpret_cast<const Column*>(header_data);
+  auto record_size = 0uz;
+  for (auto idx = 0uz; idx < column_size; idx++)
+    record_size += typeSizes.at(columns[idx].type);
+
+  int recods_per_sector =
+      (globalDiskInfo.bytes - sizeof(Address)) / record_size;
+}
 
 #endif

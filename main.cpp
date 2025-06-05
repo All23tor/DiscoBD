@@ -54,6 +54,7 @@ int main() {
 
   if (!load_csv("Titanic")) {
     std::cerr << "Tabla Titanic ya existe" << '\n';
-    return 1;
   }
+
+  read_table("Titanic");
 }
