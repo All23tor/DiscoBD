@@ -214,6 +214,7 @@ inline bool load_csv(const std::string& csv_name) {
           std::getline(ss, field, ',');
         for (char c : field)
           *(record_data++) = c;
+        static_assert(Db::size_of_type(Db::Type::String) == 64);
         for (int i = field.size(); i < Db::size_of_type(Db::Type::String); i++)
           *(record_data++) = '\0';
         break;
