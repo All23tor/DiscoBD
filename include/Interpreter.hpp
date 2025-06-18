@@ -41,7 +41,17 @@ struct Variable final : public Node {
 template <class Func>
 struct Operation final : public Node {
   static constexpr auto Visitor = [](auto&& a, auto&& b) -> Value {
-    if constexpr (requires { Func{}(a, b); })
+    if constexpr (requires {
+                    Func{}(std::string(a.data()), std::string(b.data()));
+                  }) {
+      auto res = Func{}(std::string(a.data()), std::string(b.data()));
+      if constexpr (std::is_same_v<decltype(res), std::string>) {
+        Value::fromType<Type::String> conv_res;
+        std::strcpy(conv_res.data(), res.c_str());
+        return conv_res;
+      } else
+        return res;
+    } else if constexpr (requires { Func{}(a, b); })
       return Func{}(a, b);
     else
       throw std::invalid_argument("Syntax error: Invalid operands");
@@ -62,7 +72,7 @@ struct Operation final : public Node {
 
 using NodeFactory = NodePtr (*)(NodePtr&&, NodePtr&&);
 template <typename T>
-constexpr NodeFactory opFactory =
+constexpr NodeFactory op_factory =
     [](NodePtr&& left, NodePtr&& right) -> NodePtr {
   return std::make_unique<Operation<T>>(std::move(left), std::move(right));
 };
@@ -72,23 +82,23 @@ struct OperationInfo {
   NodeFactory factory;
 };
 
-const std::array<OperationInfo, 13> operations{{
-    {"||", opFactory<std::logical_or<>>},
-    {"&&", opFactory<std::logical_and<>>},
-    {">=", opFactory<std::greater_equal<>>},
-    {"<=", opFactory<std::less_equal<>>},
-    {">", opFactory<std::greater<>>},
-    {"<", opFactory<std::less<>>},
-    {"==", opFactory<std::equal_to<>>},
-    {"!=", opFactory<std::not_equal_to<>>},
-    {"+", opFactory<std::plus<>>},
-    {"-", opFactory<std::minus<>>},
-    {"*", opFactory<std::multiplies<>>},
-    {"/", opFactory<std::divides<>>},
-    {"%", opFactory<std::modulus<>>},
+constexpr std::array<OperationInfo, 13> operations{{
+    {"||", op_factory<std::logical_or<>>},
+    {"&&", op_factory<std::logical_and<>>},
+    {">=", op_factory<std::greater_equal<>>},
+    {"<=", op_factory<std::less_equal<>>},
+    {">", op_factory<std::greater<>>},
+    {"<", op_factory<std::less<>>},
+    {"==", op_factory<std::equal_to<>>},
+    {"!=", op_factory<std::not_equal_to<>>},
+    {"+", op_factory<std::plus<>>},
+    {"-", op_factory<std::minus<>>},
+    {"*", op_factory<std::multiplies<>>},
+    {"/", op_factory<std::divides<>>},
+    {"%", op_factory<std::modulus<>>},
 }};
 
-std::size_t handleUnaryMinus(std::string_view expr, std::size_t pos) {
+std::size_t handle_unary_minus(std::string_view expr, std::size_t pos) {
   if (pos == 0)
     pos = expr.find("-", 1);
   while (pos != std::string_view::npos && !std::isalnum(expr[pos - 1]))
@@ -96,11 +106,11 @@ std::size_t handleUnaryMinus(std::string_view expr, std::size_t pos) {
   return pos;
 }
 
-std::pair<std::size_t, OperationInfo> findLowest(std::string_view expr) {
+std::pair<std::size_t, OperationInfo> find_lowest(std::string_view expr) {
   for (const auto& operation : operations) {
     auto pos = expr.find(operation.name);
     if (operation.name == "-")
-      pos = handleUnaryMinus(expr, pos);
+      pos = handle_unary_minus(expr, pos);
 
     if (pos == std::string_view::npos)
       continue;
@@ -120,7 +130,7 @@ std::pair<std::size_t, OperationInfo> findLowest(std::string_view expr) {
   return {std::string_view::npos, {}};
 }
 
-bool balancedParenthesis(std::string& expression) {
+bool balanced_parenthesis(std::string& expression) {
   int depth = 0;
   for (std::size_t i = 0; i < expression.length() - 1; ++i) {
     char c = expression[i];
@@ -134,7 +144,7 @@ bool balancedParenthesis(std::string& expression) {
   return true;
 }
 
-Value::Variant parseAsValue(std::string&& expression) {
+Value::Variant parse_as_value(std::string&& expression) {
   if (expression == "true")
     return true;
   if (expression == "false")
@@ -143,8 +153,8 @@ Value::Variant parseAsValue(std::string&& expression) {
     return std::stod(expression);
   if (expression.front() == '"') {
     Value::fromType<Type::String> arr;
-    for (int i = 1; i < expression.length() - 1; i++)
-      arr[i - 1] = expression[i];
+    for (int i = 0; i < expression.length() - 2; i++)
+      arr[i] = expression[i + 1];
     arr[expression.length() - 2] = '\0';
     return arr;
   }
@@ -154,19 +164,19 @@ Value::Variant parseAsValue(std::string&& expression) {
 NodePtr makeTree(std::string&& expression, const Column* columns,
                  std::size_t column_size) {
   while (expression.front() == '(' && expression.back() == ')')
-    if (balancedParenthesis(expression))
+    if (balanced_parenthesis(expression))
       expression = expression.substr(1, expression.length() - 2);
     else
       break;
 
-  auto [pos, op] = findLowest(expression);
+  auto [pos, op] = find_lowest(expression);
   if (pos == std::string_view::npos) {
     for (auto idx = 0uz; idx < column_size; idx++) {
       auto name = &columns[idx].name[0];
       if (std::strcmp(name, expression.c_str()) == 0)
         return std::make_unique<Variable>(idx);
     }
-    return std::make_unique<ValueNode>(parseAsValue(std::move(expression)));
+    return std::make_unique<ValueNode>(parse_as_value(std::move(expression)));
   }
 
   auto leftNode = makeTree(expression.substr(0, pos), columns, column_size);
