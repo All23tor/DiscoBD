@@ -1,4 +1,4 @@
-#include "table.hpp"
+#include "Table.hpp"
 #include <sstream>
 
 int main() {

@@ -1,7 +1,7 @@
 #ifndef INTERPRETER_HPP
 #define INTERPRETER_HPP
 
-#include "type.hpp"
+#include "Type.hpp"
 
 #include <cstring>
 #include <functional>

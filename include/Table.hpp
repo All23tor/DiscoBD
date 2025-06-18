@@ -1,9 +1,8 @@
 #ifndef CSV_HPP
 #define CSV_HPP
 
-#include "disk.hpp"
-#include "interpreter.hpp"
-#include "type.hpp"
+#include "Disk.hpp"
+#include "Interpreter.hpp"
 
 #include <cstdint>
 #include <iostream>
