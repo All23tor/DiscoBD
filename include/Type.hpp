@@ -80,7 +80,7 @@ private:
 };
 
 template <Db::Type Type = Db::Type::Int>
-std::size_t size_of_type(Db::Type type) {
+constexpr std::size_t size_of_type(Db::Type type) {
   if (type == Type)
     return sizeof(Db::Value::fromType<Type>);
   else if constexpr (Type != Db::Type::String) {
