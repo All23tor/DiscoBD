@@ -35,6 +35,8 @@ struct Frame {
 };
 
 class BufferPool {
+  int hits = 0;
+  int total_access = 0;
   const int capacity;
   std::unordered_map<int, Frame> frames;
   std::list<int> lru;
@@ -63,14 +65,19 @@ public:
                 << frame.dirty_bit << '\t' << frame.pin_count << '\t' << idx++
                 << '\n';
     }
-    std::cout << '\n';
+    std::cout << '\n'
+              << "Total access " << total_access << "\tHits " << hits << '\n';
+    std::cout << "Hit rate " << static_cast<float>(hits) * 100 / total_access
+              << "%\n";
   }
 
   const char* load_sector(Address sector_address) {
+    total_access++;
     print();
     std::cout << '\n';
     int block_id = sector_address.address / globalDiskInfo.block_size;
     if (auto it = frames.find(block_id); it != frames.end()) {
+      hits++;
       std::cout << "Updating " << block_id << '\n';
       lru.erase(std::find(lru.begin(), lru.end(), block_id));
       lru.push_back(block_id);
@@ -118,9 +125,11 @@ public:
   }
 
   char* load_writeable_sector(Address sector_address) {
+    total_access++;
     print();
     int block_id = sector_address.address / globalDiskInfo.block_size;
     if (auto it = frames.find(block_id); it != frames.end()) {
+      hits++;
       std::cout << "Updating " << block_id << '\n';
       lru.erase(std::find(lru.begin(), lru.end(), block_id));
       lru.push_back(block_id);
