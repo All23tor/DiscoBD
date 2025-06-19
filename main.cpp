@@ -51,9 +51,8 @@ int main() {
             << '\n'
             << '\n';
 
-  std::cout << "  > ";
   std::string line;
-  while (std::getline(std::cin, line)) {
+  while (std::cout << "  > ", std::getline(std::cin, line)) {
     std::stringstream ss{std::move(line)};
     std::string word;
     ss >> word;
@@ -101,10 +100,8 @@ int main() {
           delete_where(table_name, clause);
         }
       }
-    } else if (word == "INFO") {
+    } else if (word == "INFO")
       disk_info();
-    }
-    std::cout << "  > ";
   }
   std::cout << std::endl;
 }

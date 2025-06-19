@@ -251,48 +251,6 @@ TableHeaderInfo read_table_header(const std::string& table_name) {
   int bitmap_size = (records_per_sector + 7) / 8; // ceiling division
   return {records_address, record_size, columns, columns_size, bitmap_size};
 }
-} // namespace
-
-inline bool load_csv(const std::string& csv_name) {
-  bool already_exists = (search_table(csv_name) != NullAddress);
-  if (already_exists)
-    return false;
-
-  std::ifstream file(csv_name + ".csv");
-  if (!file)
-    return false;
-
-  std::string schema_str;
-  std::getline(file, schema_str);
-  std::stringstream schema(std::move(schema_str));
-
-  std::size_t record_size = 0;
-  std::vector<Db::Column> columns;
-  std::string line;
-  while (std::getline(schema, line, ',')) {
-    std::stringstream ss(std::move(line));
-    Db::Column column;
-    std::string name;
-    std::getline(ss, name, '#');
-    name.resize(sizeof(Db::SmallString));
-    ss >> column.type;
-    for (int i = 0; i < name.size(); i++)
-      column.name[i] = name[i];
-    for (int i = name.size(); i < column.name.size(); i++)
-      column.name[i] = '\0';
-    record_size += Db::size_of_type(column.type);
-    columns.push_back(std::move(column));
-  }
-
-  int records_per_sector =
-      8 * (globalDiskInfo.bytes - sizeof(Address) - sizeof(int)) /
-      (8 * record_size + 1);
-
-  auto records_start = write_table_header(csv_name, columns);
-  write_table_data(file, records_start, columns, records_per_sector);
-
-  return true;
-}
 
 template <class Visitor>
 void visit_records(Address records_address, int bitmap_size, int record_size,
@@ -334,6 +292,48 @@ void visit_writeable_records(Address records_address, int bitmap_size,
 
     records_address = next_address;
   }
+}
+} // namespace
+
+inline bool load_csv(const std::string& csv_name) {
+  bool already_exists = (search_table(csv_name) != NullAddress);
+  if (already_exists)
+    return false;
+
+  std::ifstream file(csv_name + ".csv");
+  if (!file)
+    return false;
+
+  std::string schema_str;
+  std::getline(file, schema_str);
+  std::stringstream schema(std::move(schema_str));
+
+  std::size_t record_size = 0;
+  std::vector<Db::Column> columns;
+  std::string line;
+  while (std::getline(schema, line, ',')) {
+    std::stringstream ss(std::move(line));
+    Db::Column column;
+    std::string name;
+    std::getline(ss, name, '#');
+    name.resize(sizeof(Db::SmallString));
+    ss >> column.type;
+    for (int i = 0; i < name.size(); i++)
+      column.name[i] = name[i];
+    for (int i = name.size(); i < column.name.size(); i++)
+      column.name[i] = '\0';
+    record_size += Db::size_of_type(column.type);
+    columns.push_back(std::move(column));
+  }
+
+  int records_per_sector =
+      8 * (globalDiskInfo.bytes - sizeof(Address) - sizeof(int)) /
+      (8 * record_size + 1);
+
+  auto records_start = write_table_header(csv_name, columns);
+  write_table_data(file, records_start, columns, records_per_sector);
+
+  return true;
 }
 
 inline void select_all(const std::string& table_name) {
