@@ -8,8 +8,6 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
-#include <set>
-#include <tuple>
 
 namespace fs = std::filesystem;
 namespace ip = boost::interprocess;
@@ -24,7 +22,6 @@ const auto& pun_cast(const T& t) {
 }
 
 const static inline auto disk_path = fs::current_path() / "disk";
-const static inline auto blocks_path = fs::current_path() / "blocks";
 
 static inline struct DiskInfo {
   int plates;
@@ -91,8 +88,6 @@ inline void make_disk(const DiskInfo& diskInfo) {
   auto data = reinterpret_cast<char*>(first_map.get_address());
   globalDiskInfo = diskInfo;
   reinterpret_cast<DiskInfo&>(*data) = globalDiskInfo;
-
-  fs::create_directory(blocks_path);
 }
 
 inline void read_disk_info() {
@@ -103,95 +98,5 @@ inline void read_disk_info() {
   auto data = reinterpret_cast<char*>(first_map.get_address());
   globalDiskInfo = reinterpret_cast<DiskInfo&>(*data);
 }
-
-class CowBlock {
-  mutable int written = false;
-  ip::mapped_region block_map;
-
-  static inline std::set<CowBlock, std::less<>> loaded_blocks;
-
-  CowBlock(const int block_idx) {
-    auto block_path = blocks_path / ("b" + std::to_string(block_idx));
-    std::ofstream block_stream = block_path;
-    for (char c : pun_cast(block_idx))
-      block_stream.put(c);
-
-    for (int sector = 0; sector < globalDiskInfo.block_size; sector++) {
-      Address sector_address = {block_idx * globalDiskInfo.block_size + sector};
-      auto sector_path = sector_address.to_path();
-      std::ifstream sector_file = sector_path;
-      block_stream << sector_file.rdbuf();
-    }
-
-    block_stream.close();
-    ip::file_mapping block_file(block_path.c_str(), ip::mode_t::read_write);
-    block_map = ip::mapped_region(block_file, ip::mode_t::read_write);
-  }
-
-public:
-  CowBlock(CowBlock&&) = default;
-  static const char* load_sector(Address sector_address) {
-    int block = sector_address.address / globalDiskInfo.block_size;
-    auto it = loaded_blocks.find(block);
-    if (it == loaded_blocks.end())
-      std::tie(it, std::ignore) = loaded_blocks.insert(CowBlock(block));
-    return it->data() + globalDiskInfo.bytes * (sector_address.address %
-                                                globalDiskInfo.block_size);
-  }
-
-  static char* load_writeable_sector(Address sector_address) {
-    int block = sector_address.address / globalDiskInfo.block_size;
-    auto it = loaded_blocks.find(block);
-    if (it == loaded_blocks.end())
-      std::tie(it, std::ignore) = loaded_blocks.emplace(CowBlock(block));
-    return it->writeable_data() +
-           globalDiskInfo.bytes *
-               (sector_address.address % globalDiskInfo.block_size);
-  }
-
-  static void unload_sectors() {
-    loaded_blocks.clear();
-  }
-
-  const char* data() const {
-    return reinterpret_cast<const char*>(block_map.get_address()) + sizeof(int);
-  }
-
-  char* writeable_data() const {
-    written = true;
-    return reinterpret_cast<char*>(block_map.get_address()) + sizeof(int);
-  }
-
-  ~CowBlock() {
-    if (!written)
-      return;
-
-    int block_idx = *reinterpret_cast<const int*>((data() - sizeof(int)));
-    for (int sector = 0; sector < globalDiskInfo.block_size; sector++) {
-      auto sector_data = data() + sector * globalDiskInfo.bytes;
-      Address sector_address = {block_idx * globalDiskInfo.block_size + sector};
-      auto sector_path = sector_address.to_path();
-      std::ofstream sector_file = sector_path;
-      sector_file.write(sector_data, globalDiskInfo.bytes);
-    }
-  }
-
-  friend bool operator<(const CowBlock& lhs, const CowBlock& rhs) {
-    int lhsblock_idx =
-        *reinterpret_cast<const int*>((lhs.data() - sizeof(int)));
-    int rhsblock_idx =
-        *reinterpret_cast<const int*>((rhs.data() - sizeof(int)));
-    return lhsblock_idx < rhsblock_idx;
-  }
-
-  friend bool operator<(const CowBlock& block, int idx) {
-    int block_idx = *reinterpret_cast<const int*>((block.data() - sizeof(int)));
-    return block_idx < idx;
-  }
-  friend bool operator<(int idx, const CowBlock& block) {
-    int block_idx = *reinterpret_cast<const int*>((block.data() - sizeof(int)));
-    return idx < block_idx;
-  }
-};
 
 #endif

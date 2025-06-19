@@ -1,7 +1,7 @@
 #ifndef CSV_HPP
 #define CSV_HPP
 
-#include "Disk.hpp"
+#include "BufferManager.hpp"
 #include "Interpreter.hpp"
 #include "Type.hpp"
 
@@ -43,14 +43,15 @@ read_columns(std::stringstream schema) {
   return {columns, record_size};
 }
 
-Address request_available_sector(int records_per_sector) {
+Address request_available_sector(int records_per_sector,
+                                 BufferPool& buffer_pool) {
   int total_sectors = globalDiskInfo.plates * 2 * globalDiskInfo.tracks *
                       globalDiskInfo.sectors;
   int total_blocks = total_sectors / globalDiskInfo.block_size;
   for (int block_idx = 0; block_idx < total_blocks; block_idx++) {
     for (int s_offset = 0; s_offset < globalDiskInfo.block_size; s_offset++) {
       Address address = {block_idx * globalDiskInfo.block_size + s_offset};
-      auto data = CowBlock::load_sector(address);
+      auto data = buffer_pool.load_sector(address);
       data += sizeof(Address);
       int record_count = reinterpret_cast<const int&>(*data);
       if (record_count < records_per_sector)
@@ -60,14 +61,14 @@ Address request_available_sector(int records_per_sector) {
   throw std::bad_alloc();
 }
 
-Address request_empty_sector() {
+Address request_empty_sector(BufferPool& buffer_pool) {
   int total_sectors = globalDiskInfo.plates * 2 * globalDiskInfo.tracks *
                       globalDiskInfo.sectors;
   int total_blocks = total_sectors / globalDiskInfo.block_size;
   for (int block_idx = 0; block_idx < total_blocks; block_idx++) {
     for (int s_offset = 0; s_offset < globalDiskInfo.block_size; s_offset++) {
       Address address = {block_idx * globalDiskInfo.block_size + s_offset};
-      auto data = CowBlock::load_sector(address);
+      auto data = buffer_pool.load_sector(address);
       auto next_address = reinterpret_cast<const Address&>(*data);
       if (next_address.address == 0)
         return address;
@@ -76,7 +77,7 @@ Address request_empty_sector() {
   throw std::bad_alloc();
 }
 
-void disk_info() {
+void disk_info(BufferPool& buffer_pool) {
   auto total_bytes = globalDiskInfo.plates * 2 * globalDiskInfo.tracks *
                      globalDiskInfo.sectors * globalDiskInfo.bytes;
   std::cout << "Capacidad total del disco: " << total_bytes << " bytes \n";
@@ -89,7 +90,7 @@ void disk_info() {
   for (int block_idx = 0; block_idx < total_blocks; block_idx++) {
     for (int s_offset = 0; s_offset < globalDiskInfo.block_size; s_offset++) {
       Address address = {block_idx * globalDiskInfo.block_size + s_offset};
-      auto data = CowBlock::load_sector(address);
+      auto data = buffer_pool.load_sector(address);
       auto next_address = reinterpret_cast<const Address&>(*data);
       if (next_address.address == 0) {
         sectors_available++;
@@ -107,8 +108,8 @@ void disk_info() {
             << " bytes ocupados\n";
 }
 
-Address search_table(const std::string& table_name) {
-  auto first_data = CowBlock::load_sector({0}) + sizeof(DiskInfo);
+Address search_table(const std::string& table_name, BufferPool& buffer_pool) {
+  auto first_data = buffer_pool.load_sector({0}) + sizeof(DiskInfo);
   auto tables = reinterpret_cast<const Table*>(first_data);
   int table_idx = 0;
 
@@ -129,8 +130,9 @@ Address search_table(const std::string& table_name) {
 }
 
 Address* write_table_header(const std::string& table_name,
-                            const std::vector<Db::Column>& columns) {
-  auto first_data = CowBlock::load_writeable_sector({0}) + sizeof(DiskInfo);
+                            const std::vector<Db::Column>& columns,
+                            BufferPool& buffer_pool) {
+  auto first_data = buffer_pool.load_writeable_sector({0}) + sizeof(DiskInfo);
   auto tables = reinterpret_cast<Table*>(first_data);
   int table_idx = 0;
 
@@ -143,8 +145,8 @@ Address* write_table_header(const std::string& table_name,
   for (int i = table_name.size(); i < table.name.size(); i++)
     table.name[i] = '\0';
 
-  auto header_sector = request_empty_sector();
-  auto header_data = CowBlock::load_writeable_sector(header_sector);
+  auto header_sector = request_empty_sector(buffer_pool);
+  auto header_data = buffer_pool.load_writeable_sector(header_sector);
   table.sector = header_sector;
 
   auto records_start = reinterpret_cast<Address*>(header_data);
@@ -163,9 +165,10 @@ Address* write_table_header(const std::string& table_name,
 }
 
 void write_sector_header(Address*& next_sector, char*& record_data,
-                         int*& record_count, char*& bitmap, int bitmap_size) {
-  *next_sector = request_empty_sector();
-  record_data = CowBlock::load_writeable_sector(*next_sector);
+                         int*& record_count, char*& bitmap, int bitmap_size,
+                         BufferPool& buffer_pool) {
+  *next_sector = request_empty_sector(buffer_pool);
+  record_data = buffer_pool.load_writeable_sector(*next_sector);
   next_sector = reinterpret_cast<Address*>(record_data);
   *next_sector = NullAddress;
   record_data += sizeof(Address);
@@ -229,18 +232,18 @@ void write_record(char*& record_data, std::stringstream ss,
 
 void write_table_data(std::ifstream& file, Address* next_sector,
                       const Db::Column* columns, int columns_size,
-                      int records_per_sector) {
+                      int records_per_sector, BufferPool& buffer_pool) {
   int bitmap_size = (records_per_sector + 7) / 8; // ceiling division
   char* record_data;
   int* record_count;
   char* bitmap;
   write_sector_header(next_sector, record_data, record_count, bitmap,
-                      bitmap_size);
+                      bitmap_size, buffer_pool);
 
   for (std::string line; std::getline(file, line); (*record_count)++) {
     if (*record_count == records_per_sector)
       write_sector_header(next_sector, record_data, record_count, bitmap,
-                          bitmap_size);
+                          bitmap_size, buffer_pool);
 
     write_record(record_data, std::stringstream(std::move(line)), columns,
                  columns_size);
@@ -256,12 +259,13 @@ struct TableHeaderInfo {
   int bitmap_size;
 };
 
-TableHeaderInfo read_table_header(const std::string& table_name) {
-  auto header_sector = search_table(table_name);
+TableHeaderInfo read_table_header(const std::string& table_name,
+                                  BufferPool& buffer_pool) {
+  auto header_sector = search_table(table_name, buffer_pool);
   if (header_sector == NullAddress)
     throw std::exception();
 
-  auto header_data = CowBlock::load_sector(header_sector);
+  auto header_data = buffer_pool.load_sector(header_sector);
   auto records_address = reinterpret_cast<const Address&>(*header_data);
   header_data += sizeof(Address);
   int columns_size = reinterpret_cast<const int&>(*header_data);
@@ -281,9 +285,9 @@ TableHeaderInfo read_table_header(const std::string& table_name) {
 
 template <class Visitor>
 void visit_records(Address records_address, int bitmap_size, int record_size,
-                   Visitor&& v) {
+                   BufferPool& buffer_pool, Visitor&& v) {
   while (records_address != NullAddress) {
-    auto records_data = CowBlock::load_sector(records_address);
+    auto records_data = buffer_pool.load_sector(records_address);
     auto next_address = reinterpret_cast<const Address&>(*records_data);
     records_data += sizeof(Address);
     auto record_count = reinterpret_cast<const int&>(*records_data);
@@ -302,9 +306,10 @@ void visit_records(Address records_address, int bitmap_size, int record_size,
 
 template <class Visitor>
 void visit_writeable_records(Address records_address, int bitmap_size,
-                             int record_size, Visitor&& v) {
+                             int record_size, BufferPool& buffer_pool,
+                             Visitor&& v) {
   while (records_address != NullAddress) {
-    auto records_data = CowBlock::load_writeable_sector(records_address);
+    auto records_data = buffer_pool.load_writeable_sector(records_address);
     auto next_address = reinterpret_cast<Address&>(*records_data);
     records_data += sizeof(Address);
     auto record_count = reinterpret_cast<int&>(*records_data);
@@ -323,28 +328,28 @@ void visit_writeable_records(Address records_address, int bitmap_size,
 
 } // namespace
 
-inline void load_csv(const std::string& csv_name) {
+inline void load_csv(const std::string& csv_name, BufferPool& buffer_pool) {
   std::ifstream file(csv_name + ".csv");
-  auto header_sector = search_table(csv_name);
+  auto header_sector = search_table(csv_name, buffer_pool);
 
   if (header_sector != NullAddress) {
-    auto header_info = read_table_header(csv_name);
+    auto header_info = read_table_header(csv_name, buffer_pool);
     file.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
     int records_per_sector =
         8 * (globalDiskInfo.bytes - sizeof(Address) - sizeof(int)) /
         (8 * header_info.record_size + 1);
 
-    auto header_data = CowBlock::load_writeable_sector(header_sector);
+    auto header_data = buffer_pool.load_writeable_sector(header_sector);
     Address* next_address = reinterpret_cast<Address*>(header_data);
     auto records_address = *next_address;
     while (records_address != NullAddress) {
-      auto records_data = CowBlock::load_writeable_sector(records_address);
+      auto records_data = buffer_pool.load_writeable_sector(records_address);
       next_address = reinterpret_cast<Address*>(records_data);
       records_address = *next_address;
     }
 
     write_table_data(file, next_address, header_info.columns,
-                     header_info.columns_size, records_per_sector);
+                     header_info.columns_size, records_per_sector, buffer_pool);
   } else {
     std::string schema_str;
     std::getline(file, schema_str);
@@ -354,16 +359,16 @@ inline void load_csv(const std::string& csv_name) {
         8 * (globalDiskInfo.bytes - sizeof(Address) - sizeof(int)) /
         (8 * record_size + 1);
 
-    auto records_start = write_table_header(csv_name, columns);
+    auto records_start = write_table_header(csv_name, columns, buffer_pool);
     write_table_data(file, records_start, columns.data(), columns.size(),
-                     records_per_sector);
+                     records_per_sector, buffer_pool);
   }
 }
 
-inline void select_all(const std::string& table_name) {
+inline void select_all(const std::string& table_name, BufferPool& buffer_pool) {
   TableHeaderInfo header_info;
   try {
-    header_info = read_table_header(table_name);
+    header_info = read_table_header(table_name, buffer_pool);
   } catch (...) {
     std::cerr << "Tabla " << table_name << " no existe\n";
     return;
@@ -371,7 +376,7 @@ inline void select_all(const std::string& table_name) {
 
   visit_records(
       header_info.records_address, header_info.bitmap_size,
-      header_info.record_size,
+      header_info.record_size, buffer_pool,
       [columns = header_info.columns, columns_size = header_info.columns_size](
           const char* records_data, std::size_t record_idx,
           const char* bitmap) {
@@ -394,10 +399,11 @@ inline void select_all(const std::string& table_name) {
 }
 
 inline void select_all_where(const std::string& table_name,
-                             const std::string& expression) {
+                             const std::string& expression,
+                             BufferPool& buffer_pool) {
   TableHeaderInfo header_info;
   try {
-    header_info = read_table_header(table_name);
+    header_info = read_table_header(table_name, buffer_pool);
   } catch (...) {
     std::cerr << "Tabla " << table_name << " no existe\n";
     return;
@@ -408,7 +414,7 @@ inline void select_all_where(const std::string& table_name,
 
   visit_records(
       header_info.records_address, header_info.bitmap_size,
-      header_info.record_size,
+      header_info.record_size, buffer_pool,
       [columns = header_info.columns, columns_size = header_info.columns_size,
        &tree](const char* records_data, std::size_t record_idx,
               const char* bitmap) {
@@ -436,10 +442,11 @@ inline void select_all_where(const std::string& table_name,
 }
 
 inline void delete_where(const std::string& table_name,
-                         const std::string& expression) {
+                         const std::string& expression,
+                         BufferPool& buffer_pool) {
   TableHeaderInfo header_info;
   try {
-    header_info = read_table_header(table_name);
+    header_info = read_table_header(table_name, buffer_pool);
   } catch (...) {
     std::cerr << "Tabla " << table_name << " no existe\n";
     return;
@@ -450,7 +457,7 @@ inline void delete_where(const std::string& table_name,
 
   visit_writeable_records(
       header_info.records_address, header_info.bitmap_size,
-      header_info.record_size,
+      header_info.record_size, buffer_pool,
       [&tree, columns = header_info.columns,
        columns_size = header_info.columns_size](
           char* records_data, std::size_t record_idx, char* bitmap) {

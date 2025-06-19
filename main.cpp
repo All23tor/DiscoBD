@@ -2,6 +2,11 @@
 #include <sstream>
 
 int main() {
+  int buffer_pool_capacity;
+  std::cout << "Capacidad del buffer pool: ";
+  std::cin >> buffer_pool_capacity;
+  BufferPool buffer_pool(buffer_pool_capacity);
+
   if (!fs::exists(disk_path)) {
     DiskInfo diskInfo;
     std::cout << "El disco aún no existe, se procederá a su creación\n\n";
@@ -59,7 +64,7 @@ int main() {
     if (word == "LOAD") {
       std::string name;
       ss >> name;
-      load_csv(name);
+      load_csv(name, buffer_pool);
       std::cout << "\tSe cargó la tabla " << name << " exitosamente\n";
     } else if (word == "SELECT") {
       std::string fields;
@@ -76,9 +81,9 @@ int main() {
           if (WHERE == "WHERE") {
             std::string clause;
             std::getline(ss, clause, '\n');
-            select_all_where(table_name, clause);
+            select_all_where(table_name, clause, buffer_pool);
           } else {
-            select_all(table_name);
+            select_all(table_name, buffer_pool);
           }
         }
       }
@@ -94,11 +99,11 @@ int main() {
         if (WHERE == "WHERE") {
           std::string clause;
           std::getline(ss, clause, '\n');
-          delete_where(table_name, clause);
+          delete_where(table_name, clause, buffer_pool);
         }
       }
     } else if (word == "INFO")
-      disk_info();
+      disk_info(buffer_pool);
   }
   std::cout << std::endl;
 }
