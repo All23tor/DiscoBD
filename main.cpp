@@ -2,11 +2,6 @@
 #include <sstream>
 
 int main() {
-  int buffer_pool_capacity;
-  std::cout << "Capacidad del buffer pool: ";
-  std::cin >> buffer_pool_capacity;
-  BufferPool buffer_pool(buffer_pool_capacity);
-
   if (!fs::exists(disk_path)) {
     DiskInfo diskInfo;
     std::cout << "El disco aún no existe, se procederá a su creación\n\n";
@@ -46,6 +41,11 @@ int main() {
   }
 
   std::cout << '\n';
+  int buffer_pool_capacity;
+  std::cout << "Capacidad del buffer pool: ";
+  std::cin >> buffer_pool_capacity;
+  BufferPool buffer_pool(buffer_pool_capacity);
+
   std::cout << "Información del disco:\n";
   std::cout << "Número de platos: " << globalDiskInfo.plates << '\n';
   std::cout << "Número de pistas por plato: " << globalDiskInfo.tracks << '\n';
@@ -102,6 +102,8 @@ int main() {
           delete_where(table_name, clause, buffer_pool);
         }
       }
+    } else if (word == "BUFFER") {
+      buffer_pool.print();
     } else if (word == "INFO")
       disk_info(buffer_pool);
   }

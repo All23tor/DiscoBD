@@ -147,6 +147,7 @@ Address* write_table_header(const std::string& table_name,
 
   auto header_sector = request_empty_sector(buffer_pool);
   auto header_data = buffer_pool.load_writeable_sector(header_sector);
+  buffer_pool.pin(header_sector);
   table.sector = header_sector;
 
   auto records_start = reinterpret_cast<Address*>(header_data);
@@ -266,6 +267,7 @@ TableHeaderInfo read_table_header(const std::string& table_name,
     throw std::exception();
 
   auto header_data = buffer_pool.load_sector(header_sector);
+  buffer_pool.pin(header_sector);
   auto records_address = reinterpret_cast<const Address&>(*header_data);
   header_data += sizeof(Address);
   int columns_size = reinterpret_cast<const int&>(*header_data);
@@ -330,7 +332,7 @@ void visit_writeable_records(Address records_address, int bitmap_size,
 
 inline void load_csv(const std::string& csv_name, BufferPool& buffer_pool) {
   std::ifstream file(csv_name + ".csv");
-  auto header_sector = search_table(csv_name, buffer_pool);
+  const auto header_sector = search_table(csv_name, buffer_pool);
 
   if (header_sector != NullAddress) {
     auto header_info = read_table_header(csv_name, buffer_pool);
@@ -363,6 +365,8 @@ inline void load_csv(const std::string& csv_name, BufferPool& buffer_pool) {
     write_table_data(file, records_start, columns.data(), columns.size(),
                      records_per_sector, buffer_pool);
   }
+
+  buffer_pool.unpin(header_sector);
 }
 
 inline void select_all(const std::string& table_name, BufferPool& buffer_pool) {
@@ -396,6 +400,8 @@ inline void select_all(const std::string& table_name, BufferPool& buffer_pool) {
         }
         std::cout << '\n';
       });
+  auto header_sector = search_table(table_name, buffer_pool);
+  buffer_pool.unpin(header_sector);
 }
 
 inline void select_all_where(const std::string& table_name,
@@ -439,6 +445,8 @@ inline void select_all_where(const std::string& table_name,
         }
         std::cout << '\n';
       });
+  auto header_sector = search_table(table_name, buffer_pool);
+  buffer_pool.unpin(header_sector);
 }
 
 inline void delete_where(const std::string& table_name,
@@ -483,5 +491,7 @@ inline void delete_where(const std::string& table_name,
         std::cout << '\n';
         bitmap[record_idx / 8] &= ~(1 << record_idx % 8);
       });
+  auto header_sector = search_table(table_name, buffer_pool);
+  buffer_pool.unpin(header_sector);
 }
 #endif
