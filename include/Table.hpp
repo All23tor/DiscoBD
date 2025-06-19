@@ -315,6 +315,27 @@ void visit_records(Address records_address, int bitmap_size, int record_size,
   }
 }
 
+template <class Visitor>
+void visit_writeable_records(Address records_address, int bitmap_size,
+                             int record_size, Visitor&& v) {
+  while (records_address != NullAddress) {
+    auto records_data = CowBlock::load_writeable_sector(records_address);
+    auto next_address = reinterpret_cast<Address&>(*records_data);
+    records_data += sizeof(Address);
+    auto record_count = reinterpret_cast<int&>(*records_data);
+    records_data += sizeof(int);
+    auto bitmap = records_data;
+    records_data += bitmap_size;
+
+    for (auto record_idx = 0uz; record_idx < record_count; record_idx++) {
+      v(records_data, record_idx, bitmap);
+      records_data += record_size;
+    }
+
+    records_address = next_address;
+  }
+}
+
 inline void select_all(const std::string& table_name) {
   TableHeaderInfo header_info;
   try {
@@ -390,4 +411,46 @@ inline void select_all_where(const std::string& table_name,
       });
 }
 
+inline void delete_where(const std::string& table_name,
+                         const std::string& expression) {
+  TableHeaderInfo header_info;
+  try {
+    header_info = read_table_header(table_name);
+  } catch (...) {
+    std::cerr << "Tabla " << table_name << " no existe\n";
+    return;
+  }
+
+  auto tree = parseExpression(expression, header_info.columns,
+                              header_info.columns_size);
+
+  visit_writeable_records(
+      header_info.records_address, header_info.bitmap_size,
+      header_info.record_size,
+      [&tree, columns = header_info.columns,
+       columns_size = header_info.columns_size](
+          char* records_data, std::size_t record_idx, char* bitmap) {
+        bool bit = (bitmap[record_idx / 8] >> (record_idx % 8)) & 1;
+        if (!bit)
+          return;
+
+        bool selected;
+        selected = tree->evaluate(records_data, columns).get<Db::Type::Bool>();
+        if (!selected)
+          return;
+
+        for (auto column_idx = 0uz; column_idx < columns_size; column_idx++) {
+          if (column_idx != 0)
+            std::cout << '#';
+          visit_field(records_data, column_idx, columns, [](auto&& arg) {
+            if constexpr (requires { std::cout << arg; })
+              std::cout << arg;
+            else
+              std::cout << arg.data();
+          });
+        }
+        std::cout << '\n';
+        bitmap[record_idx / 8] &= ~(1 << record_idx % 8);
+      });
+}
 #endif

@@ -86,6 +86,21 @@ int main() {
           }
         }
       }
+    } else if (word == "DELETE") {
+      std::string FROM;
+      ss >> FROM;
+      if (FROM == "FROM") {
+        std::string table_name;
+        ss >> table_name;
+
+        std::string WHERE;
+        ss >> WHERE;
+        if (WHERE == "WHERE") {
+          std::string clause;
+          std::getline(ss, clause, '\n');
+          delete_where(table_name, clause);
+        }
+      }
     } else if (word == "INFO") {
       disk_info();
     }
