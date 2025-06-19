@@ -12,6 +12,7 @@
 namespace fs = std::filesystem;
 namespace ip = boost::interprocess;
 
+// Funciones auxiliares para escribir información aarchivos binarios
 template <class T>
 auto& pun_cast(T& t) {
   return reinterpret_cast<std::array<char, sizeof(T)>&>(t);
@@ -21,8 +22,10 @@ const auto& pun_cast(const T& t) {
   return reinterpret_cast<const std::array<char, sizeof(T)>&>(t);
 }
 
+// Ruta a la raíz del disco
 const static inline auto disk_path = fs::current_path() / "disk";
 
+// Información global acerca del disco
 static inline struct DiskInfo {
   int plates;
   int tracks;
@@ -31,9 +34,12 @@ static inline struct DiskInfo {
   int block_size;
 } globalDiskInfo = {-1, -1, -1, -1, -1};
 
+// Direccion de un sector guardada con lógica de aritmética modular para
+// minimizar el movimiento de la aguja
 struct Address {
   int address;
 
+  // Comparación de dos direcciones
   bool operator==(const Address&) const = default;
   static Address from_tree(int plate, int surface, int track, int sector) {
     return {plate +
@@ -42,6 +48,7 @@ struct Address {
                               (track + globalDiskInfo.tracks * surface))};
   }
 
+  // Convierte una dirección a la ruta al archivo del sector correspondiente
   fs::path to_path() const {
     int address = this->address;
     auto plate = address % globalDiskInfo.plates;
@@ -58,6 +65,8 @@ struct Address {
   }
 };
 
+// Crea un disko con la información proporcinada (diskInfo)
+// Inicializa en su primer sector esta misma información
 inline void make_disk(const DiskInfo& diskInfo) {
   fs::create_directory(disk_path);
   std::cout << disk_path << '\n';
@@ -90,6 +99,8 @@ inline void make_disk(const DiskInfo& diskInfo) {
   reinterpret_cast<DiskInfo&>(*data) = globalDiskInfo;
 }
 
+// Lee la información del disco de un secotr ya existente, este es el único
+// acceso al disco que se realiza fuera del buffer manager.
 inline void read_disk_info() {
   auto disk = fs::current_path() / "disk";
   auto first_path = disk / "p0" / "f0" / "t0" / "s0";

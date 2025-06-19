@@ -7,30 +7,39 @@
 #include <functional>
 #include <memory>
 
+// Patrón de diseño Interpreter para parsear las expresiones WHERE
 namespace Db {
+
+// Clase nodo abstracta que representa un valos dentro del árbol sintáctico
 struct Node {
   virtual ~Node() = default;
+  // Evaluación requiere de un contexto (un registro e informaciónde sus tipos)
   virtual Value evaluate(const char*, const Column*) const = 0;
 };
 
 namespace {
 using NodePtr = std::unique_ptr<Node>;
+
+// Clase que representa un valor constante
 struct ValueNode final : public Node {
   const Value number;
 
   ValueNode(const Value& _number) : number{_number} {}
   ValueNode(Value&& _number) : number{std::move(_number)} {}
   ~ValueNode() override = default;
+  // Retorna el valor almacenado (no usa el contexto)
   Value evaluate(const char*, const Column*) const override {
     return number;
   }
 };
 
+// Clase que representa una variable (campo de un registro)
 struct Variable final : public Node {
   const std::size_t index;
 
   Variable(std::size_t _name) : index{_name} {}
   ~Variable() override = default;
+  // Solicita el valor contenido en el registro
   Value evaluate(const char* record, const Column* schema) const override {
     return visit_field(record, index, schema, [](auto&& arg) -> Value {
       return arg;
@@ -38,8 +47,12 @@ struct Variable final : public Node {
   }
 };
 
+// Template de clase que representa una operación entre dos valores
+// Utilizamos un Functor para evaluar la operación
 template <class Func>
 struct Operation final : public Node {
+  // Composición del functor que acepta cualquier combinación de tipos
+  // (necesario para usar visit)
   static constexpr auto Visitor = [](auto&& a, auto&& b) -> Value {
     if constexpr (requires {
                     Func{}(std::string(a.data()), std::string(b.data()));
@@ -63,6 +76,7 @@ struct Operation final : public Node {
       left(std::move(_left)),
       right(std::move(_right)) {}
   virtual ~Operation() override = default;
+  // Evalúa el nodo llamando al funtor con doas argumentos
   Value evaluate(const char* record, const Column* context) const override {
     auto lhs = left->evaluate(record, context);
     auto rhs = right->evaluate(record, context);
@@ -70,6 +84,7 @@ struct Operation final : public Node {
   }
 };
 
+// Función auxiliar para crear nodos de operaciones
 using NodeFactory = NodePtr (*)(NodePtr&&, NodePtr&&);
 template <typename T>
 constexpr NodeFactory op_factory =
@@ -82,6 +97,7 @@ struct OperationInfo {
   NodeFactory factory;
 };
 
+// Tabla de operaciones soportadas (y su representación textual)
 constexpr std::array<OperationInfo, 13> operations{{
     {"||", op_factory<std::logical_or<>>},
     {"&&", op_factory<std::logical_and<>>},

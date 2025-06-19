@@ -87,7 +87,7 @@ Address request_empty_sector(BufferManager& buffer_manager) {
 }
 
 // Imprimeen pantalla la información del disco (para el acceso a este requiere
-// del buffer)
+// del buffer manager)
 void disk_info(BufferManager& buffer_manager) {
   auto total_bytes = globalDiskInfo.plates * 2 * globalDiskInfo.tracks *
                      globalDiskInfo.sectors * globalDiskInfo.bytes;
@@ -119,6 +119,8 @@ void disk_info(BufferManager& buffer_manager) {
             << " bytes ocupados\n";
 }
 
+// Busca una tabla dentro del primer sector del disco (para esto requiere del
+// buffer manager), de no encontrar la tabla, retorna la direccion nula
 Address search_table(const std::string& table_name,
                      BufferManager& buffer_manager) {
   auto first_data = buffer_manager.load_sector({0}) + sizeof(DiskInfo);
@@ -141,6 +143,11 @@ Address search_table(const std::string& table_name,
   return NullAddress;
 }
 
+// Dentro del primer sector del disco (para esto requiere del
+// buffer manager), escribe la información de una nueva tabla (table_name,
+// columns), retorna un puntero al campo del primer sector que contiene
+// registros de la tabla (su valor siempre será nulo, pero es útil el mantener
+// su ubicación)
 Address* write_table_header(const std::string& table_name,
                             const std::vector<Db::Column>& columns,
                             BufferManager& buffer_manager) {
@@ -178,6 +185,11 @@ Address* write_table_header(const std::string& table_name,
   return records_start;
 }
 
+// Escribe la cabecera de un sector, proporcionados un lugar donde guardar su
+// dirección (next_sector), un lugar donde guardar los datos (record_data), y
+// accesos rápidos para modificar la cuenta de registros y el bitmap de
+// eliminaciones (record_count, bitmap), necesita para esto el tamaño del bitmap
+// y acceso al buffer_manager
 void write_sector_header(Address*& next_sector, char*& record_data,
                          int*& record_count, char*& bitmap, int bitmap_size,
                          BufferManager& buffer_manager) {
@@ -196,6 +208,8 @@ void write_sector_header(Address*& next_sector, char*& record_data,
   }
 }
 
+// Escribe un registro (ss) en la dirección proporcionada (record_data), para
+// esto requiere la información de las columnas (columns, columns_size)
 void write_record(char*& record_data, std::stringstream ss,
                   const Db::Column* columns, int columns_size) {
   for (int column_idx = 0; column_idx < columns_size; column_idx++) {
@@ -244,6 +258,10 @@ void write_record(char*& record_data, std::stringstream ss,
   }
 }
 
+// Escribe todos los datos de un archivo (file), empezando por un sector
+// (next_sector), y solicitando más en la medida que se requira, para esto
+// requiere de la información de la columnas (columns, columns_size) y acceso al
+// buffer manager
 void write_table_data(std::ifstream& file, Address* next_sector,
                       const Db::Column* columns, int columns_size,
                       int records_per_sector, BufferManager& buffer_manager) {
@@ -265,6 +283,8 @@ void write_table_data(std::ifstream& file, Address* next_sector,
   }
 }
 
+// Información de la cabecera de cada tabla en una estructura POD, solo se
+// utiliza al leer información ya existente en el disco
 struct TableHeaderInfo {
   Address records_address;
   std::size_t record_size;
@@ -273,6 +293,8 @@ struct TableHeaderInfo {
   int bitmap_size;
 };
 
+// Lee la cabcera de una tabla (de exisitir, caso contrario no hace nada), para
+// esto necesita acceso al buffer manager. Retorna la información leída.
 TableHeaderInfo read_table_header(const std::string& table_name,
                                   BufferManager& buffer_manager) {
   auto header_sector = search_table(table_name, buffer_manager);
@@ -298,6 +320,10 @@ TableHeaderInfo read_table_header(const std::string& table_name,
   return {records_address, record_size, columns, columns_size, bitmap_size};
 }
 
+// Itera a traves de los registros invocando un funtor que no modifica los
+// registros (v), (empezando por records_adress), para realizar el proceso
+// requiere del tamaño del bitmap (bitmap_size), el tamaño de cada registro
+// (record_size), acceso al buffer manager
 template <class Visitor>
 void visit_records(Address records_address, int bitmap_size, int record_size,
                    BufferManager& buffer_manager, Visitor&& v) {
@@ -319,6 +345,10 @@ void visit_records(Address records_address, int bitmap_size, int record_size,
   }
 }
 
+// Itera a traves de los registros invocando un funtor que puede modificar los
+// registros (v), (empezando por records_adress), para realizar el proceso
+// requiere del tamaño del bitmap (bitmap_size), el tamaño de cada registro
+// (record_size), acceso al buffer manager
 template <class Visitor>
 void visit_writeable_records(Address records_address, int bitmap_size,
                              int record_size, BufferManager& buffer_manager,
@@ -343,6 +373,8 @@ void visit_writeable_records(Address records_address, int bitmap_size,
 
 } // namespace
 
+// Carga los registros de un .csv (y adicionalmente crea una tabla de no
+// existir)
 inline void load_csv(const std::string& csv_name,
                      BufferManager& buffer_manager) {
   std::ifstream file(csv_name + ".csv");
@@ -384,6 +416,8 @@ inline void load_csv(const std::string& csv_name,
   buffer_manager.unpin(header_sector);
 }
 
+// Selecciona todos los campos de los registros de una tabla y los muestra en
+// pantalla
 inline void select_all(const std::string& table_name,
                        BufferManager& buffer_manager) {
   TableHeaderInfo header_info;
@@ -420,6 +454,8 @@ inline void select_all(const std::string& table_name,
   buffer_manager.unpin(header_sector);
 }
 
+// Selecciona todos los campos de los registros de una tabla que satisfagan
+// cierta condifión (expression) y los muestra en pantalla
 inline void select_all_where(const std::string& table_name,
                              const std::string& expression,
                              BufferManager& buffer_manager) {
@@ -465,6 +501,8 @@ inline void select_all_where(const std::string& table_name,
   buffer_manager.unpin(header_sector);
 }
 
+// Elimina todos los registros de una tabla que satisfagan
+// cierta condifión (expression) y los muestra en pantalla
 inline void delete_where(const std::string& table_name,
                          const std::string& expression,
                          BufferManager& buffer_manager) {
