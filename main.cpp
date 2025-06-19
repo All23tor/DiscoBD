@@ -42,10 +42,10 @@ int main() {
   }
 
   std::cout << '\n';
-  int buffer_pool_capacity;
+  int buffer_manager_capacity;
   std::cout << "Capacidad del buffer pool: ";
-  std::cin >> buffer_pool_capacity;
-  BufferManager buffer_pool(buffer_pool_capacity);
+  std::cin >> buffer_manager_capacity;
+  BufferManager buffer_manager(buffer_manager_capacity);
 
   std::cout << "Información del disco:\n";
   std::cout << "Número de platos: " << globalDiskInfo.plates << '\n';
@@ -65,7 +65,7 @@ int main() {
     if (word == "LOAD") {
       std::string name;
       ss >> name;
-      load_csv(name, buffer_pool);
+      load_csv(name, buffer_manager);
       std::cout << "\tSe cargó la tabla " << name << " exitosamente\n";
     } else if (word == "SELECT") {
       std::string fields;
@@ -82,9 +82,9 @@ int main() {
           if (WHERE == "WHERE") {
             std::string clause;
             std::getline(ss, clause, '\n');
-            select_all_where(table_name, clause, buffer_pool);
+            select_all_where(table_name, clause, buffer_manager);
           } else {
-            select_all(table_name, buffer_pool);
+            select_all(table_name, buffer_manager);
           }
         }
       }
@@ -100,31 +100,31 @@ int main() {
         if (WHERE == "WHERE") {
           std::string clause;
           std::getline(ss, clause, '\n');
-          delete_where(table_name, clause, buffer_pool);
+          delete_where(table_name, clause, buffer_manager);
         }
       }
     } else if (word == "BUFFER") {
-      buffer_pool.print();
+      buffer_manager.print();
     } else if (word == "REQUEST") {
       int page_idx;
       ss >> page_idx;
       char rw;
       ss >> rw;
       if (rw == 'W')
-        buffer_pool.load_writeable_sector(
+        buffer_manager.load_writeable_sector(
             {page_idx * globalDiskInfo.block_size});
       else if (rw == 'L')
-        buffer_pool.load_sector({page_idx * globalDiskInfo.block_size});
+        buffer_manager.load_sector({page_idx * globalDiskInfo.block_size});
     } else if (word == "PIN") {
       int page_idx;
       ss >> page_idx;
-      buffer_pool.pin({page_idx * globalDiskInfo.block_size});
+      buffer_manager.pin({page_idx * globalDiskInfo.block_size});
     } else if (word == "UNPIN") {
       int page_idx;
       ss >> page_idx;
-      buffer_pool.unpin({page_idx * globalDiskInfo.block_size});
+      buffer_manager.unpin({page_idx * globalDiskInfo.block_size});
     } else if (word == "INFO")
-      disk_info(buffer_pool);
+      disk_info(buffer_manager);
   }
   std::cout << std::endl;
 }
