@@ -102,20 +102,22 @@ public:
       std::cout << "Updating " << block_id << '\n';
       lru.erase(std::find(lru.begin(), lru.end(), block_id));
       lru.push_back(block_id);
+      auto res = it->second.data() +
+                 globalDiskInfo.bytes *
+                     (sector_address.address % globalDiskInfo.block_size);
       print();
-      return it->second.data() +
-             globalDiskInfo.bytes *
-                 (sector_address.address % globalDiskInfo.block_size);
+      return res;
     }
 
     if (pool.size() < capacity) {
       std::cout << "Adding " << block_id << '\n';
       lru.push_back(block_id);
       auto [it, _] = pool.insert({block_id, Frame(block_id)});
+      auto res = it->second.data() +
+                 globalDiskInfo.bytes *
+                     (sector_address.address % globalDiskInfo.block_size);
       print();
-      return it->second.data() +
-             globalDiskInfo.bytes *
-                 (sector_address.address % globalDiskInfo.block_size);
+      return res;
     }
 
     auto lru_it = lru.begin();
@@ -142,10 +144,11 @@ public:
     lru.push_back(block_id);
     std::cout << "Replacing with " << block_id << '\n';
     auto [it, _] = pool.insert({block_id, Frame(block_id)});
+    auto res = it->second.data() +
+               globalDiskInfo.bytes *
+                   (sector_address.address % globalDiskInfo.block_size);
     print();
-    return it->second.data() +
-           globalDiskInfo.bytes *
-               (sector_address.address % globalDiskInfo.block_size);
+    return res;
   }
 
   // Recibe una dirección de sector, se encarga de hallar el bloque
@@ -160,10 +163,11 @@ public:
       std::cout << "Updating " << block_id << '\n';
       lru.erase(std::find(lru.begin(), lru.end(), block_id));
       lru.push_back(block_id);
+      auto res = it->second.writeable_data() +
+                 globalDiskInfo.bytes *
+                     (sector_address.address % globalDiskInfo.block_size);
       print();
-      return it->second.writeable_data() +
-             globalDiskInfo.bytes *
-                 (sector_address.address % globalDiskInfo.block_size);
+      return res;
     }
 
     if (pool.size() < capacity) {
@@ -171,9 +175,11 @@ public:
       lru.push_back(block_id);
       auto [it, _] = pool.insert({block_id, Frame(block_id)});
       print();
-      return it->second.writeable_data() +
-             globalDiskInfo.bytes *
-                 (sector_address.address % globalDiskInfo.block_size);
+      auto res = it->second.writeable_data() +
+                 globalDiskInfo.bytes *
+                     (sector_address.address % globalDiskInfo.block_size);
+      print();
+      return res;
     }
 
     auto lru_it = lru.begin();
@@ -200,10 +206,11 @@ public:
     lru.push_back(block_id);
     std::cout << "Replacing with " << block_id << '\n';
     auto [it, _] = pool.insert({block_id, Frame(block_id)});
+    auto res = it->second.writeable_data() +
+               globalDiskInfo.bytes *
+                   (sector_address.address % globalDiskInfo.block_size);
     print();
-    return it->second.writeable_data() +
-           globalDiskInfo.bytes *
-               (sector_address.address % globalDiskInfo.block_size);
+    return res;
   }
 
   // Recibe una dirección de sector, se encarga de hallar el bloque
