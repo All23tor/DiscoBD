@@ -96,7 +96,6 @@ public:
   // lectura)
   const char* load_sector(Address sector_address) {
     total_access++;
-    std::cout << '\n';
     int block_id = sector_address.address / globalDiskInfo.block_size;
     if (auto it = pool.find(block_id); it != pool.end()) {
       hits++;
