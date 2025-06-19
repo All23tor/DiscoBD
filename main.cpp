@@ -59,11 +59,8 @@ int main() {
     if (word == "LOAD") {
       std::string name;
       ss >> name;
-      if (load_csv(name))
-        std::cout << "\tSe cargó la tabla " << name << " exitosamente\n";
-      else
-        std::cout << "\tLa tabla " << name
-                  << " no se pudo cargar o ya existe\n";
+      load_csv(name);
+      std::cout << "\tSe cargó la tabla " << name << " exitosamente\n";
     } else if (word == "SELECT") {
       std::string fields;
       ss >> fields;

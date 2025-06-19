@@ -6,7 +6,9 @@
 #include "Type.hpp"
 
 #include <cstdint>
+#include <ios>
 #include <iostream>
+#include <limits>
 #include <utility>
 #include <vector>
 
@@ -17,6 +19,29 @@ struct Table {
 
 namespace {
 static constexpr Address NullAddress = {-1};
+
+std::pair<std::vector<Db::Column>, std::size_t>
+read_columns(std::stringstream schema) {
+  std::size_t record_size = 0;
+  std::vector<Db::Column> columns;
+  std::string line;
+  while (std::getline(schema, line, ',')) {
+    std::stringstream ss(std::move(line));
+    Db::Column column;
+    std::string name;
+    std::getline(ss, name, '#');
+    name.resize(sizeof(Db::SmallString));
+    ss >> column.type;
+    for (int i = 0; i < name.size(); i++)
+      column.name[i] = name[i];
+    for (int i = name.size(); i < column.name.size(); i++)
+      column.name[i] = '\0';
+    record_size += Db::size_of_type(column.type);
+    columns.push_back(std::move(column));
+  }
+
+  return {columns, record_size};
+}
 
 Address request_available_sector(int records_per_sector) {
   int total_sectors = globalDiskInfo.plates * 2 * globalDiskInfo.tracks *
@@ -155,8 +180,9 @@ void write_sector_header(Address*& next_sector, char*& record_data,
 }
 
 void write_record(char*& record_data, std::stringstream ss,
-                  const std::vector<Db::Column>& columns) {
-  for (auto& [name, type] : columns) {
+                  const Db::Column* columns, int columns_size) {
+  for (int column_idx = 0; column_idx < columns_size; column_idx++) {
+    const auto& [name, type] = columns[column_idx];
     std::string field;
     switch (type) {
     case Db::Type::Int: {
@@ -202,7 +228,7 @@ void write_record(char*& record_data, std::stringstream ss,
 }
 
 void write_table_data(std::ifstream& file, Address* next_sector,
-                      const std::vector<Db::Column>& columns,
+                      const Db::Column* columns, int columns_size,
                       int records_per_sector) {
   int bitmap_size = (records_per_sector + 7) / 8; // ceiling division
   char* record_data;
@@ -216,7 +242,8 @@ void write_table_data(std::ifstream& file, Address* next_sector,
       write_sector_header(next_sector, record_data, record_count, bitmap,
                           bitmap_size);
 
-    write_record(record_data, std::stringstream(std::move(line)), columns);
+    write_record(record_data, std::stringstream(std::move(line)), columns,
+                 columns_size);
     bitmap[*record_count / 8] |= 1 << (*record_count % 8);
   }
 }
@@ -293,47 +320,44 @@ void visit_writeable_records(Address records_address, int bitmap_size,
     records_address = next_address;
   }
 }
+
 } // namespace
 
-inline bool load_csv(const std::string& csv_name) {
-  bool already_exists = (search_table(csv_name) != NullAddress);
-  if (already_exists)
-    return false;
-
+inline void load_csv(const std::string& csv_name) {
   std::ifstream file(csv_name + ".csv");
-  if (!file)
-    return false;
+  auto header_sector = search_table(csv_name);
 
-  std::string schema_str;
-  std::getline(file, schema_str);
-  std::stringstream schema(std::move(schema_str));
+  if (header_sector != NullAddress) {
+    auto header_info = read_table_header(csv_name);
+    file.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+    int records_per_sector =
+        8 * (globalDiskInfo.bytes - sizeof(Address) - sizeof(int)) /
+        (8 * header_info.record_size + 1);
 
-  std::size_t record_size = 0;
-  std::vector<Db::Column> columns;
-  std::string line;
-  while (std::getline(schema, line, ',')) {
-    std::stringstream ss(std::move(line));
-    Db::Column column;
-    std::string name;
-    std::getline(ss, name, '#');
-    name.resize(sizeof(Db::SmallString));
-    ss >> column.type;
-    for (int i = 0; i < name.size(); i++)
-      column.name[i] = name[i];
-    for (int i = name.size(); i < column.name.size(); i++)
-      column.name[i] = '\0';
-    record_size += Db::size_of_type(column.type);
-    columns.push_back(std::move(column));
+    auto header_data = CowBlock::load_writeable_sector(header_sector);
+    Address* next_address = reinterpret_cast<Address*>(header_data);
+    auto records_address = *next_address;
+    while (records_address != NullAddress) {
+      auto records_data = CowBlock::load_writeable_sector(records_address);
+      next_address = reinterpret_cast<Address*>(records_data);
+      records_address = *next_address;
+    }
+
+    write_table_data(file, next_address, header_info.columns,
+                     header_info.columns_size, records_per_sector);
+  } else {
+    std::string schema_str;
+    std::getline(file, schema_str);
+    auto [columns, record_size] =
+        read_columns(std::stringstream(std::move(schema_str)));
+    int records_per_sector =
+        8 * (globalDiskInfo.bytes - sizeof(Address) - sizeof(int)) /
+        (8 * record_size + 1);
+
+    auto records_start = write_table_header(csv_name, columns);
+    write_table_data(file, records_start, columns.data(), columns.size(),
+                     records_per_sector);
   }
-
-  int records_per_sector =
-      8 * (globalDiskInfo.bytes - sizeof(Address) - sizeof(int)) /
-      (8 * record_size + 1);
-
-  auto records_start = write_table_header(csv_name, columns);
-  write_table_data(file, records_start, columns, records_per_sector);
-
-  return true;
 }
 
 inline void select_all(const std::string& table_name) {
