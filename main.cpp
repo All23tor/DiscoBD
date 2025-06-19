@@ -1,3 +1,4 @@
+#include "Disk.hpp"
 #include "Table.hpp"
 #include <sstream>
 
@@ -104,6 +105,24 @@ int main() {
       }
     } else if (word == "BUFFER") {
       buffer_pool.print();
+    } else if (word == "REQUEST") {
+      int page_idx;
+      ss >> page_idx;
+      char rw;
+      ss >> rw;
+      if (rw == 'W')
+        buffer_pool.load_writeable_sector(
+            {page_idx * globalDiskInfo.block_size});
+      else if (rw == 'L')
+        buffer_pool.load_sector({page_idx * globalDiskInfo.block_size});
+    } else if (word == "PIN") {
+      int page_idx;
+      ss >> page_idx;
+      buffer_pool.pin({page_idx * globalDiskInfo.block_size});
+    } else if (word == "UNPIN") {
+      int page_idx;
+      ss >> page_idx;
+      buffer_pool.unpin({page_idx * globalDiskInfo.block_size});
     } else if (word == "INFO")
       disk_info(buffer_pool);
   }

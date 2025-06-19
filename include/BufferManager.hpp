@@ -73,7 +73,6 @@ public:
 
   const char* load_sector(Address sector_address) {
     total_access++;
-    print();
     std::cout << '\n';
     int block_id = sector_address.address / globalDiskInfo.block_size;
     if (auto it = frames.find(block_id); it != frames.end()) {
@@ -81,6 +80,7 @@ public:
       std::cout << "Updating " << block_id << '\n';
       lru.erase(std::find(lru.begin(), lru.end(), block_id));
       lru.push_back(block_id);
+      print();
       return it->second.data() +
              globalDiskInfo.bytes *
                  (sector_address.address % globalDiskInfo.block_size);
@@ -90,6 +90,7 @@ public:
       std::cout << "Adding " << block_id << '\n';
       lru.push_back(block_id);
       auto [it, _] = frames.insert({block_id, Frame(block_id)});
+      print();
       return it->second.data() +
              globalDiskInfo.bytes *
                  (sector_address.address % globalDiskInfo.block_size);
@@ -119,6 +120,7 @@ public:
     lru.push_back(block_id);
     std::cout << "Replacing with " << block_id << '\n';
     auto [it, _] = frames.insert({block_id, Frame(block_id)});
+    print();
     return it->second.data() +
            globalDiskInfo.bytes *
                (sector_address.address % globalDiskInfo.block_size);
@@ -126,13 +128,13 @@ public:
 
   char* load_writeable_sector(Address sector_address) {
     total_access++;
-    print();
     int block_id = sector_address.address / globalDiskInfo.block_size;
     if (auto it = frames.find(block_id); it != frames.end()) {
       hits++;
       std::cout << "Updating " << block_id << '\n';
       lru.erase(std::find(lru.begin(), lru.end(), block_id));
       lru.push_back(block_id);
+      print();
       return it->second.writeable_data() +
              globalDiskInfo.bytes *
                  (sector_address.address % globalDiskInfo.block_size);
@@ -142,6 +144,7 @@ public:
       std::cout << "Adding " << block_id << '\n';
       lru.push_back(block_id);
       auto [it, _] = frames.insert({block_id, Frame(block_id)});
+      print();
       return it->second.writeable_data() +
              globalDiskInfo.bytes *
                  (sector_address.address % globalDiskInfo.block_size);
@@ -171,6 +174,7 @@ public:
     lru.push_back(block_id);
     std::cout << "Replacing with " << block_id << '\n';
     auto [it, _] = frames.insert({block_id, Frame(block_id)});
+    print();
     return it->second.writeable_data() +
            globalDiskInfo.bytes *
                (sector_address.address % globalDiskInfo.block_size);
