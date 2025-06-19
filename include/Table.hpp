@@ -12,14 +12,19 @@
 #include <utility>
 #include <vector>
 
+// Estructura POD que representa el modo en el que la información de una tabla
+// se guarda en el disco
 struct Table {
   Db::SmallString name;
   Address sector;
 };
 
 namespace {
+// Valor que utilizamos de dirección nula
 static constexpr Address NullAddress = {-1};
 
+// Lee de una linea de un archivo csv las columnas,
+// adicionalmente calcula el tamaño de cada registro y lo retorna
 std::pair<std::vector<Db::Column>, std::size_t>
 read_columns(std::stringstream schema) {
   std::size_t record_size = 0;
@@ -44,7 +49,7 @@ read_columns(std::stringstream schema) {
 }
 
 Address request_available_sector(int records_per_sector,
-                                 BufferPool& buffer_pool) {
+                                 BufferManager& buffer_pool) {
   int total_sectors = globalDiskInfo.plates * 2 * globalDiskInfo.tracks *
                       globalDiskInfo.sectors;
   int total_blocks = total_sectors / globalDiskInfo.block_size;
@@ -61,7 +66,7 @@ Address request_available_sector(int records_per_sector,
   throw std::bad_alloc();
 }
 
-Address request_empty_sector(BufferPool& buffer_pool) {
+Address request_empty_sector(BufferManager& buffer_pool) {
   int total_sectors = globalDiskInfo.plates * 2 * globalDiskInfo.tracks *
                       globalDiskInfo.sectors;
   int total_blocks = total_sectors / globalDiskInfo.block_size;
@@ -77,7 +82,7 @@ Address request_empty_sector(BufferPool& buffer_pool) {
   throw std::bad_alloc();
 }
 
-void disk_info(BufferPool& buffer_pool) {
+void disk_info(BufferManager& buffer_pool) {
   auto total_bytes = globalDiskInfo.plates * 2 * globalDiskInfo.tracks *
                      globalDiskInfo.sectors * globalDiskInfo.bytes;
   std::cout << "Capacidad total del disco: " << total_bytes << " bytes \n";
@@ -108,7 +113,8 @@ void disk_info(BufferPool& buffer_pool) {
             << " bytes ocupados\n";
 }
 
-Address search_table(const std::string& table_name, BufferPool& buffer_pool) {
+Address search_table(const std::string& table_name,
+                     BufferManager& buffer_pool) {
   auto first_data = buffer_pool.load_sector({0}) + sizeof(DiskInfo);
   auto tables = reinterpret_cast<const Table*>(first_data);
   int table_idx = 0;
@@ -131,7 +137,7 @@ Address search_table(const std::string& table_name, BufferPool& buffer_pool) {
 
 Address* write_table_header(const std::string& table_name,
                             const std::vector<Db::Column>& columns,
-                            BufferPool& buffer_pool) {
+                            BufferManager& buffer_pool) {
   auto first_data = buffer_pool.load_writeable_sector({0}) + sizeof(DiskInfo);
   auto tables = reinterpret_cast<Table*>(first_data);
   int table_idx = 0;
@@ -167,7 +173,7 @@ Address* write_table_header(const std::string& table_name,
 
 void write_sector_header(Address*& next_sector, char*& record_data,
                          int*& record_count, char*& bitmap, int bitmap_size,
-                         BufferPool& buffer_pool) {
+                         BufferManager& buffer_pool) {
   *next_sector = request_empty_sector(buffer_pool);
   record_data = buffer_pool.load_writeable_sector(*next_sector);
   next_sector = reinterpret_cast<Address*>(record_data);
@@ -233,7 +239,7 @@ void write_record(char*& record_data, std::stringstream ss,
 
 void write_table_data(std::ifstream& file, Address* next_sector,
                       const Db::Column* columns, int columns_size,
-                      int records_per_sector, BufferPool& buffer_pool) {
+                      int records_per_sector, BufferManager& buffer_pool) {
   int bitmap_size = (records_per_sector + 7) / 8; // ceiling division
   char* record_data;
   int* record_count;
@@ -261,7 +267,7 @@ struct TableHeaderInfo {
 };
 
 TableHeaderInfo read_table_header(const std::string& table_name,
-                                  BufferPool& buffer_pool) {
+                                  BufferManager& buffer_pool) {
   auto header_sector = search_table(table_name, buffer_pool);
   if (header_sector == NullAddress)
     throw std::exception();
@@ -287,7 +293,7 @@ TableHeaderInfo read_table_header(const std::string& table_name,
 
 template <class Visitor>
 void visit_records(Address records_address, int bitmap_size, int record_size,
-                   BufferPool& buffer_pool, Visitor&& v) {
+                   BufferManager& buffer_pool, Visitor&& v) {
   while (records_address != NullAddress) {
     auto records_data = buffer_pool.load_sector(records_address);
     auto next_address = reinterpret_cast<const Address&>(*records_data);
@@ -308,7 +314,7 @@ void visit_records(Address records_address, int bitmap_size, int record_size,
 
 template <class Visitor>
 void visit_writeable_records(Address records_address, int bitmap_size,
-                             int record_size, BufferPool& buffer_pool,
+                             int record_size, BufferManager& buffer_pool,
                              Visitor&& v) {
   while (records_address != NullAddress) {
     auto records_data = buffer_pool.load_writeable_sector(records_address);
@@ -330,7 +336,7 @@ void visit_writeable_records(Address records_address, int bitmap_size,
 
 } // namespace
 
-inline void load_csv(const std::string& csv_name, BufferPool& buffer_pool) {
+inline void load_csv(const std::string& csv_name, BufferManager& buffer_pool) {
   std::ifstream file(csv_name + ".csv");
   const auto header_sector = search_table(csv_name, buffer_pool);
 
@@ -369,7 +375,8 @@ inline void load_csv(const std::string& csv_name, BufferPool& buffer_pool) {
   buffer_pool.unpin(header_sector);
 }
 
-inline void select_all(const std::string& table_name, BufferPool& buffer_pool) {
+inline void select_all(const std::string& table_name,
+                       BufferManager& buffer_pool) {
   TableHeaderInfo header_info;
   try {
     header_info = read_table_header(table_name, buffer_pool);
@@ -406,7 +413,7 @@ inline void select_all(const std::string& table_name, BufferPool& buffer_pool) {
 
 inline void select_all_where(const std::string& table_name,
                              const std::string& expression,
-                             BufferPool& buffer_pool) {
+                             BufferManager& buffer_pool) {
   TableHeaderInfo header_info;
   try {
     header_info = read_table_header(table_name, buffer_pool);
@@ -451,7 +458,7 @@ inline void select_all_where(const std::string& table_name,
 
 inline void delete_where(const std::string& table_name,
                          const std::string& expression,
-                         BufferPool& buffer_pool) {
+                         BufferManager& buffer_pool) {
   TableHeaderInfo header_info;
   try {
     header_info = read_table_header(table_name, buffer_pool);

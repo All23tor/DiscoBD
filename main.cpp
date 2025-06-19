@@ -45,7 +45,7 @@ int main() {
   int buffer_pool_capacity;
   std::cout << "Capacidad del buffer pool: ";
   std::cin >> buffer_pool_capacity;
-  BufferPool buffer_pool(buffer_pool_capacity);
+  BufferManager buffer_pool(buffer_pool_capacity);
 
   std::cout << "Información del disco:\n";
   std::cout << "Número de platos: " << globalDiskInfo.plates << '\n';
