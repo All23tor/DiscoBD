@@ -54,7 +54,7 @@ class BufferManager {
   int total_access = 0;
   const int capacity;
   std::unordered_map<int, Frame> pool;
-  std::list<int> lru;
+  std::list<int> mru;
 
 public:
   // Inicializamos con la capacidad (que se mantendrá constante)
@@ -77,8 +77,8 @@ public:
 
   // Simple función de impresión de la tabla del buffer pool
   void print() const {
-    std::cout << "ID\t" << "L/W\t" << "DIRTY\t" << "PINS\t" << "LRU\t\n";
-    for (int idx{}; int frame_id : lru) {
+    std::cout << "ID\t" << "L/W\t" << "DIRTY\t" << "PINS\t" << "MRU\t\n";
+    for (int idx{}; int frame_id : mru) {
       const auto& frame = pool.at(frame_id);
       std::cout << frame_id << '\t' << (frame.dirty_bit ? 'W' : 'L') << '\t'
                 << frame.dirty_bit << '\t' << frame.pin_count << '\t' << idx++
@@ -92,7 +92,7 @@ public:
 
   // Recibe una dirección de sector, se encarga de hallar el bloque
   // correspondiente, y lo carga a una página, de ahí verifica bajo la política
-  // de remplazo LRU cómo se ubicará en el Buffer Pool (esta versión es de solo
+  // de remplazo MRU cómo se ubicará en el Buffer Pool (esta versión es de solo
   // lectura)
   const char* load_sector(Address sector_address) {
     total_access++;
@@ -100,8 +100,8 @@ public:
     if (auto it = pool.find(block_id); it != pool.end()) {
       hits++;
       std::cout << "Updating " << block_id << '\n';
-      lru.erase(std::find(lru.begin(), lru.end(), block_id));
-      lru.push_back(block_id);
+      mru.erase(std::find(mru.begin(), mru.end(), block_id));
+      mru.push_front(block_id);
       auto res = it->second.data() +
                  globalDiskInfo.bytes *
                      (sector_address.address % globalDiskInfo.block_size);
@@ -111,7 +111,7 @@ public:
 
     if (pool.size() < capacity) {
       std::cout << "Adding " << block_id << '\n';
-      lru.push_back(block_id);
+      mru.push_front(block_id);
       auto [it, _] = pool.insert({block_id, Frame(block_id)});
       auto res = it->second.data() +
                  globalDiskInfo.bytes *
@@ -120,28 +120,28 @@ public:
       return res;
     }
 
-    auto lru_it = lru.begin();
-    while (lru_it != lru.end() && pool.at(*lru_it).pin_count != 0)
-      std::cout << "Ignoring " << *lru_it << '\n', lru_it++;
+    auto mru_it = mru.begin();
+    while (mru_it != mru.end() && pool.at(*mru_it).pin_count != 0)
+      std::cout << "Ignoring " << *mru_it << '\n', mru_it++;
 
-    if (lru_it == lru.end())
+    if (mru_it == mru.end())
       throw std::runtime_error("Everything is pinned!");
 
-    int lru_id = *lru_it;
-    std::cout << "Erasing " << lru_id << '\n';
-    const Frame& lru_frame = pool.at(lru_id);
-    if (lru_frame.dirty_bit) {
+    int mru_id = *mru_it;
+    std::cout << "Erasing " << mru_id << '\n';
+    const Frame& mru_frame = pool.at(mru_id);
+    if (mru_frame.dirty_bit) {
       for (int sector = 0; sector < globalDiskInfo.block_size; sector++) {
-        auto sector_data = lru_frame.data() + sector * globalDiskInfo.bytes;
-        Address sector_address = {lru_id * globalDiskInfo.block_size + sector};
+        auto sector_data = mru_frame.data() + sector * globalDiskInfo.bytes;
+        Address sector_address = {mru_id * globalDiskInfo.block_size + sector};
         std::ofstream sector_file = sector_address.to_path();
         sector_file.write(sector_data, globalDiskInfo.bytes);
       }
     }
-    lru.erase(lru_it);
-    pool.erase(lru_id);
+    mru.erase(mru_it);
+    pool.erase(mru_id);
 
-    lru.push_back(block_id);
+    mru.push_front(block_id);
     std::cout << "Replacing with " << block_id << '\n';
     auto [it, _] = pool.insert({block_id, Frame(block_id)});
     auto res = it->second.data() +
@@ -153,7 +153,7 @@ public:
 
   // Recibe una dirección de sector, se encarga de hallar el bloque
   // correspondiente, y lo carga a una página, de ahí verifica bajo la política
-  // de remplazo LRU cómo se ubicará en el Buffer Pool (esta versión es de
+  // de remplazo MRU cómo se ubicará en el Buffer Pool (esta versión es de
   // lectura y escritura)
   char* load_writeable_sector(Address sector_address) {
     total_access++;
@@ -161,8 +161,8 @@ public:
     if (auto it = pool.find(block_id); it != pool.end()) {
       hits++;
       std::cout << "Updating " << block_id << '\n';
-      lru.erase(std::find(lru.begin(), lru.end(), block_id));
-      lru.push_back(block_id);
+      mru.erase(std::find(mru.begin(), mru.end(), block_id));
+      mru.push_back(block_id);
       auto res = it->second.writeable_data() +
                  globalDiskInfo.bytes *
                      (sector_address.address % globalDiskInfo.block_size);
@@ -172,7 +172,7 @@ public:
 
     if (pool.size() < capacity) {
       std::cout << "Adding " << block_id << '\n';
-      lru.push_back(block_id);
+      mru.push_back(block_id);
       auto [it, _] = pool.insert({block_id, Frame(block_id)});
       print();
       auto res = it->second.writeable_data() +
@@ -182,28 +182,28 @@ public:
       return res;
     }
 
-    auto lru_it = lru.begin();
-    while (lru_it != lru.end() && pool.at(*lru_it).pin_count != 0)
-      std::cout << "Ignoring " << *lru_it << '\n', lru_it++;
+    auto mru_it = mru.begin();
+    while (mru_it != mru.end() && pool.at(*mru_it).pin_count != 0)
+      std::cout << "Ignoring " << *mru_it << '\n', mru_it++;
 
-    if (lru_it == lru.end())
+    if (mru_it == mru.end())
       throw std::runtime_error("Everything is pinned!");
 
-    int lru_id = *lru_it;
-    std::cout << "Erasing " << lru_id << '\n';
-    const Frame& lru_frame = pool.at(lru_id);
-    if (lru_frame.dirty_bit) {
+    int mru_id = *mru_it;
+    std::cout << "Erasing " << mru_id << '\n';
+    const Frame& mru_frame = pool.at(mru_id);
+    if (mru_frame.dirty_bit) {
       for (int sector = 0; sector < globalDiskInfo.block_size; sector++) {
-        auto sector_data = lru_frame.data() + sector * globalDiskInfo.bytes;
-        Address sector_address = {lru_id * globalDiskInfo.block_size + sector};
+        auto sector_data = mru_frame.data() + sector * globalDiskInfo.bytes;
+        Address sector_address = {mru_id * globalDiskInfo.block_size + sector};
         std::ofstream sector_file = sector_address.to_path();
         sector_file.write(sector_data, globalDiskInfo.bytes);
       }
     }
-    lru.erase(lru_it);
-    pool.erase(lru_id);
+    mru.erase(mru_it);
+    pool.erase(mru_id);
 
-    lru.push_back(block_id);
+    mru.push_back(block_id);
     std::cout << "Replacing with " << block_id << '\n';
     auto [it, _] = pool.insert({block_id, Frame(block_id)});
     auto res = it->second.writeable_data() +
