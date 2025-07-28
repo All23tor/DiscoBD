@@ -4,8 +4,11 @@ project(disco)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-find_package(Boost 1.82.0)
-if(Boost_FOUND)
-  add_executable(${PROJECT_NAME} main.cpp)
-  target_include_directories(${PROJECT_NAME} PRIVATE include ${Boost_INCLUDE_DIRS})
-endif()
+add_executable(${PROJECT_NAME}
+  src/Disk.cpp
+  src/Interpreter.cpp
+  src/BufferManager.cpp
+  src/Table.cpp
+  main.cpp
+)
+target_include_directories(${PROJECT_NAME} PRIVATE include) 

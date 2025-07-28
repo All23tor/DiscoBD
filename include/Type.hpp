@@ -3,8 +3,6 @@
 
 #include <array>
 #include <cstdint>
-#include <iostream>
-#include <map>
 #include <utility>
 #include <variant>
 
@@ -47,26 +45,6 @@ struct Column {
   SmallString name;
   Type type;
 };
-
-// Leer un Db::Type de un archivo de entrada
-inline std::istream& operator>>(std::istream& is, Db::Type& type) {
-  static const std::map<std::string, Db::Type> typeNames = {
-      {"INT", Db::Type::Int},
-      {"FLOAT", Db::Type::Float},
-      {"BOOL", Db::Type::Bool},
-      {"STRING", Db::Type::String}};
-
-  std::string name;
-  std::getline(is, name, ' ');
-  name.erase(std::find_if(name.rbegin(), name.rend(),
-                          [](unsigned char ch) {
-                            return !std::isspace(ch);
-                          })
-                 .base(),
-             name.end());
-  type = typeNames.at(name);
-  return is;
-}
 
 // Clase principal para tratar con los campos de
 // los registros dentro de un WHERE

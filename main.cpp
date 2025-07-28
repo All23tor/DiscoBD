@@ -1,60 +1,17 @@
 #include "Disk.hpp"
 #include "Table.hpp"
+#include <iostream>
 #include <sstream>
 
-int main() {
-  if (!fs::exists(disk_path)) {
-    DiskInfo diskInfo;
-    std::cout << "El disco aún no existe, se procederá a su creación\n\n";
-    std::cout << "Cantidad de platos: ";
-    std::cin >> diskInfo.plates;
-    if (diskInfo.plates < 1) {
-      std::cout << "Debe haber por lo menos un plato\n";
-      return 1;
-    }
-    std::cout << "Cantidad de pistas por superficie: ";
-    std::cin >> diskInfo.tracks;
-    if (diskInfo.tracks < 1) {
-      std::cout << "Debe haber por lo menos una pista por superficie\n";
-      return 1;
-    }
-    std::cout << "Cantidad de sectores por pista: ";
-    std::cin >> diskInfo.sectors;
-    if (diskInfo.sectors < 1) {
-      std::cout << "Debe haber por lo menos un sector por pista\n";
-      return 1;
-    }
-    std::cout << "Tamaño de cada sector en bytes: ";
-    std::cin >> diskInfo.bytes;
-    if (diskInfo.bytes < 16) {
-      std::cout << "Debe haber por lo 16 bytes en cada sector\n";
-      return 1;
-    }
-    std::cout << "Número de sectores por bloque: ";
-    std::cin >> diskInfo.block_size;
-    if (diskInfo.block_size < 1) {
-      std::cout << "Debe haber por lo 1 sector en cada bloque\n";
-      return 1;
-    }
-    make_disk(diskInfo);
-  } else {
-    read_disk_info();
-  }
-
-  std::cout << '\n';
-  int buffer_manager_capacity;
-  std::cout << "Capacidad del buffer pool: ";
-  std::cin >> buffer_manager_capacity;
-  BufferManager buffer_manager(buffer_manager_capacity);
+void handle_inputs() {
+  BufferManager buffer_manager;
 
   std::cout << "Información del disco:\n";
-  std::cout << "Número de platos: " << globalDiskInfo.plates << '\n';
-  std::cout << "Número de pistas por plato: " << globalDiskInfo.tracks << '\n';
-  std::cout << "Número de sectores por pista: " << globalDiskInfo.sectors
-            << '\n';
-  std::cout << "Número de bytes por sector: " << globalDiskInfo.bytes << '\n';
-  std::cout << "Número de sectores por bloque: " << globalDiskInfo.block_size
-            << '\n'
+  std::cout << "Número de platos: " << global.plates << '\n';
+  std::cout << "Número de pistas por plato: " << global.tracks << '\n';
+  std::cout << "Número de sectores por pista: " << global.sectors << '\n';
+  std::cout << "Número de bytes por sector: " << global.bytes << '\n';
+  std::cout << "Número de sectores por bloque: " << global.block_size << '\n'
             << '\n';
 
   std::string line;
@@ -111,20 +68,28 @@ int main() {
       char rw;
       ss >> rw;
       if (rw == 'W')
-        buffer_manager.load_writeable_sector(
-            {page_idx * globalDiskInfo.block_size});
+        buffer_manager.load_sector<false>({page_idx * global.block_size});
       else if (rw == 'L')
-        buffer_manager.load_sector({page_idx * globalDiskInfo.block_size});
+        buffer_manager.load_sector({page_idx * global.block_size});
     } else if (word == "PIN") {
       int page_idx;
       ss >> page_idx;
-      buffer_manager.pin({page_idx * globalDiskInfo.block_size});
+      buffer_manager.pin({page_idx * global.block_size});
     } else if (word == "UNPIN") {
       int page_idx;
       ss >> page_idx;
-      buffer_manager.unpin({page_idx * globalDiskInfo.block_size});
+      buffer_manager.unpin({page_idx * global.block_size});
     } else if (word == "INFO")
       disk_info(buffer_manager);
   }
   std::cout << std::endl;
+}
+
+int main() {
+  if (!fs::exists(disk_path)) {
+    DiskInfo diskInfo;
+    std::cout << "El disco aún no existe, se procederá a su creación\n\n";
+    make_disk();
+  }
+  handle_inputs();
 }
