@@ -3,11 +3,12 @@
 
 #include "BufferManager.hpp"
 
-using str_view = std::string_view;
-void load_csv(str_view csv, BufferManager&);
-void select_all(str_view table, BufferManager&);
-void select_all_where(str_view table, str_view expr, BufferManager&);
-void delete_where(str_view table, str_view expr, BufferManager&);
+void load_csv(std::string_view csv, BufferManager&);
+void select_all(std::string_view table, BufferManager&);
+void select_all_where(std::string_view table, std::string_view expr,
+                      BufferManager&);
+void delete_where(std::string_view table, std::string_view expr,
+                  BufferManager&);
 void disk_info(BufferManager&);
 
 #endif

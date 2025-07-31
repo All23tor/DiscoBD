@@ -1,5 +1,7 @@
 #include "Interpreter.hpp"
 #include <cstring>
+#include <numeric>
+#include <ranges>
 
 namespace Db {
 namespace {
@@ -19,10 +21,15 @@ struct Variable final : public Node {
 
   Variable(std::size_t _name) : index{_name} {}
   ~Variable() override = default;
-  Value evaluate(const char* record, const Column* schema) const override {
-    return visit_field(record, index, schema, [](auto&& arg) -> Value {
-      return arg;
-    });
+  Value evaluate(const char* record, const Column* columns) const override {
+    return visit_type(
+        std::accumulate(columns, columns + index, record,
+                        [](const char* field, const Column& column) {
+                          return field + size_of_type(column.type);
+                        }),
+        columns[index].type, [](auto&& arg) -> Value {
+          return arg;
+        });
   }
 };
 
@@ -151,8 +158,7 @@ Value::Variant parse_as_value(std::string&& expression) {
   return std::stol(expression);
 }
 
-NodePtr makeTree(std::string&& expression, const Column* columns,
-                 std::size_t column_size) {
+NodePtr makeTree(std::string&& expression, std::span<const Column> columns) {
   while (expression.front() == '(' && expression.back() == ')')
     if (balanced_parenthesis(expression))
       expression = expression.substr(1, expression.length() - 2);
@@ -161,27 +167,25 @@ NodePtr makeTree(std::string&& expression, const Column* columns,
 
   auto [pos, op] = find_lowest(expression);
   if (pos == std::string_view::npos) {
-    for (auto idx = 0uz; idx < column_size; idx++) {
-      auto name = &columns[idx].name[0];
+    for (const auto& [idx, column] : std::views::enumerate(columns)) {
+      auto name = column.name.data();
       if (std::strcmp(name, expression.c_str()) == 0)
         return std::make_unique<Variable>(idx);
     }
     return std::make_unique<ValueNode>(parse_as_value(std::move(expression)));
   }
 
-  auto leftNode = makeTree(expression.substr(0, pos), columns, column_size);
-  auto rightNode =
-      makeTree(expression.substr(pos + op.name.size()), columns, column_size);
+  auto leftNode = makeTree(expression.substr(0, pos), columns);
+  auto rightNode = makeTree(expression.substr(pos + op.name.size()), columns);
   return op.factory(std::move(leftNode), std::move(rightNode));
 }
 } // namespace
 
 std::unique_ptr<Node> parseExpression(std::string_view _expression,
-                                      const Column* columns,
-                                      std::size_t column_size) {
+                                      std::span<const Column> columns) {
   std::string expression{_expression};
   std::erase(expression, ' ');
-  auto tree = makeTree(std::move(expression), columns, column_size);
+  auto tree = makeTree(std::move(expression), columns);
   return tree;
 }
 } // namespace Db

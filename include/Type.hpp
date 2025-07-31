@@ -41,10 +41,6 @@ enum class Type : std::size_t {
 
 // Columna de una tabla, tal y como
 // se guarda en el disco
-struct Column {
-  SmallString name;
-  Type type;
-};
 
 // Clase principal para tratar con los campos de
 // los registros dentro de un WHERE
@@ -98,23 +94,16 @@ auto visit_type(const void* pointer, Db::Type type, Visitor&& v) {
     return v(*reinterpret_cast<Pointer>(pointer));
   } else if constexpr (Type != Db::Type::String) {
     constexpr auto Next = static_cast<Db::Type>(std::to_underlying(Type) + 1);
-    return visit_type<Visitor, Next>(pointer, type, v);
+    return visit_type<Visitor, Next>(pointer, type, std::forward<Visitor>(v));
   } else
     throw std::bad_variant_access();
 }
 
-// Visitar un campo en el disco proporcionando el índice del campo y
-// las columnas de la tabla
-template <class Visitor>
-auto visit_field(const char* record, std::size_t index, const Column* columns,
-                 Visitor&& v) {
-  std::ptrdiff_t offset = 0;
-  for (int idx = 0; idx < index; idx++)
-    offset += size_of_type(columns[idx].type);
-  Db::Type type = columns[index].type;
-  auto field = record + offset;
-  return visit_type(field, type, v);
-}
+struct Column {
+  SmallString name;
+  Type type;
+};
+
 } // namespace Db
 
 #endif

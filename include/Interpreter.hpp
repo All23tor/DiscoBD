@@ -3,6 +3,7 @@
 
 #include "Type.hpp"
 #include <memory>
+#include <span>
 
 namespace Db {
 
@@ -11,7 +12,7 @@ struct Node {
   virtual Value evaluate(const char*, const Column*) const = 0;
 };
 using NodePtr = std::unique_ptr<Node>;
-NodePtr parseExpression(std::string_view, const Column*, std::size_t);
+NodePtr parseExpression(std::string_view, std::span<const Column>);
 } // namespace Db
 
 #endif

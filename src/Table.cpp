@@ -156,9 +156,8 @@ void write_sector_header(Address*& next_sector, char*& record_data,
 }
 
 void write_record(char*& record_data, std::stringstream ss,
-                  const Db::Column* columns, int columns_size) {
-  for (int column_idx = 0; column_idx < columns_size; column_idx++) {
-    const auto& [name, type] = columns[column_idx];
+                  std::span<const Db::Column> columns) {
+  for (const auto& [name, type] : columns) {
     std::string field;
     switch (type) {
     case Db::Type::Int: {
@@ -204,7 +203,7 @@ void write_record(char*& record_data, std::stringstream ss,
 }
 
 void write_table_data(std::ifstream& file, Address* next_sector,
-                      const Db::Column* columns, int columns_size,
+                      std::span<const Db::Column> columns,
                       int records_per_sector, BufferManager& buffer_manager) {
   int bitmap_size = (records_per_sector + 7) / 8;
   char* record_data;
@@ -218,8 +217,7 @@ void write_table_data(std::ifstream& file, Address* next_sector,
       write_sector_header(next_sector, record_data, record_count, bitmap,
                           bitmap_size, buffer_manager);
 
-    write_record(record_data, std::stringstream(std::move(line)), columns,
-                 columns_size);
+    write_record(record_data, std::stringstream(std::move(line)), columns);
     bitmap[*record_count / 8] |= 1 << (*record_count % 8);
   }
 }
@@ -227,8 +225,7 @@ void write_table_data(std::ifstream& file, Address* next_sector,
 struct TableHeaderInfo {
   Address records_address;
   std::size_t record_size;
-  const Db::Column* columns;
-  int columns_size;
+  std::span<const Db::Column> columns;
   int bitmap_size;
 };
 
@@ -253,7 +250,10 @@ TableHeaderInfo read_table_header(std::string_view table_name,
   int records_per_sector = 8 * (global.bytes - sizeof(Address) - sizeof(int)) /
                            (8 * record_size + 1);
   int bitmap_size = (records_per_sector + 7) / 8;
-  return {records_address, record_size, columns, columns_size, bitmap_size};
+  return {records_address,
+          record_size,
+          {columns, static_cast<std::size_t>(columns_size)},
+          bitmap_size};
 }
 
 template <bool Readonly = true, class Visitor>
@@ -299,8 +299,7 @@ void load_csv(std::string_view csv_name, BufferManager& buffer_manager) {
     }
 
     write_table_data(file, next_address, header_info.columns,
-                     header_info.columns_size, records_per_sector,
-                     buffer_manager);
+                     records_per_sector, buffer_manager);
   } else {
     std::string schema_str;
     std::getline(file, schema_str);
@@ -311,8 +310,8 @@ void load_csv(std::string_view csv_name, BufferManager& buffer_manager) {
                              (8 * record_size + 1);
 
     auto records_start = write_table_header(csv_name, columns, buffer_manager);
-    write_table_data(file, records_start, columns.data(), columns.size(),
-                     records_per_sector, buffer_manager);
+    write_table_data(file, records_start, columns, records_per_sector,
+                     buffer_manager);
   }
 
   buffer_manager.unpin(header_sector);
@@ -327,28 +326,28 @@ void select_all(std::string_view table_name, BufferManager& buffer_manager) {
     return;
   }
 
-  visit_records(
-      header_info.records_address, header_info.bitmap_size,
-      header_info.record_size, buffer_manager,
-      [columns = header_info.columns, columns_size = header_info.columns_size](
-          const char* records_data, std::size_t record_idx,
-          const char* bitmap) {
-        bool bit = (bitmap[record_idx / 8] >> (record_idx % 8)) & 1;
-        if (!bit)
-          return;
+  visit_records(header_info.records_address, header_info.bitmap_size,
+                header_info.record_size, buffer_manager,
+                [columns = header_info.columns](const char* records_data,
+                                                std::size_t record_idx,
+                                                const char* bitmap) {
+                  bool bit = (bitmap[record_idx / 8] >> (record_idx % 8)) & 1;
+                  if (!bit)
+                    return;
 
-        for (auto column_idx = 0uz; column_idx < columns_size; column_idx++) {
-          if (column_idx != 0)
-            std::cout << '#';
-          visit_field(records_data, column_idx, columns, [](auto&& arg) {
-            if constexpr (requires { std::cout << arg; })
-              std::cout << arg;
-            else
-              std::cout << arg.data();
-          });
-        }
-        std::cout << '\n';
-      });
+                  auto field = records_data;
+                  for (const auto& column : columns) {
+                    visit_type(field, column.type, [](auto&& arg) {
+                      if constexpr (requires { std::cout << arg; })
+                        std::cout << arg;
+                      else
+                        std::cout << arg.data();
+                    });
+                    field += size_of_type(column.type);
+                    std::cout << '#';
+                  }
+                  std::cout << '\n';
+                });
   auto header_sector = search_table(table_name, buffer_manager);
   buffer_manager.unpin(header_sector);
 }
@@ -363,33 +362,33 @@ void select_all_where(std::string_view table_name, std::string_view expression,
     return;
   }
 
-  auto tree = parseExpression(expression, header_info.columns,
-                              header_info.columns_size);
+  auto tree = parseExpression(expression, header_info.columns);
 
   visit_records(
       header_info.records_address, header_info.bitmap_size,
       header_info.record_size, buffer_manager,
-      [columns = header_info.columns, columns_size = header_info.columns_size,
-       &tree](const char* records_data, std::size_t record_idx,
-              const char* bitmap) {
+      [columns = header_info.columns, &tree](const char* records_data,
+                                             std::size_t record_idx,
+                                             const char* bitmap) {
         bool bit = (bitmap[record_idx / 8] >> (record_idx % 8)) & 1;
         if (!bit)
           return;
 
-        bool selected;
-        selected = tree->evaluate(records_data, columns).get<Db::Type::Bool>();
+        bool selected =
+            tree->evaluate(records_data, columns.data()).get<Db::Type::Bool>();
         if (!selected)
           return;
 
-        for (auto column_idx = 0uz; column_idx < columns_size; column_idx++) {
-          if (column_idx != 0)
-            std::cout << '#';
-          visit_field(records_data, column_idx, columns, [](auto&& arg) {
+        auto field = records_data;
+        for (const auto& column : columns) {
+          visit_type(field, column.type, [](auto&& arg) {
             if constexpr (requires { std::cout << arg; })
               std::cout << arg;
             else
               std::cout << arg.data();
           });
+          std::cout << '#';
+          field += size_of_type(column.type);
         }
         std::cout << '\n';
       });
@@ -407,33 +406,31 @@ void delete_where(std::string_view table_name, std::string_view expression,
     return;
   }
 
-  auto tree = parseExpression(expression, header_info.columns,
-                              header_info.columns_size);
+  auto tree = parseExpression(expression, header_info.columns);
 
   visit_records<false>(
       header_info.records_address, header_info.bitmap_size,
       header_info.record_size, buffer_manager,
-      [&tree, columns = header_info.columns,
-       columns_size = header_info.columns_size](
+      [&tree, columns = header_info.columns](
           char* records_data, std::size_t record_idx, char* bitmap) {
         bool bit = (bitmap[record_idx / 8] >> (record_idx % 8)) & 1;
         if (!bit)
           return;
 
-        bool selected;
-        selected = tree->evaluate(records_data, columns).get<Db::Type::Bool>();
+        bool selected =
+            tree->evaluate(records_data, columns.data()).get<Db::Type::Bool>();
         if (!selected)
           return;
-
-        for (auto column_idx = 0uz; column_idx < columns_size; column_idx++) {
-          if (column_idx != 0)
-            std::cout << '#';
-          visit_field(records_data, column_idx, columns, [](auto&& arg) {
+        auto field = records_data;
+        for (const auto& column : columns) {
+          visit_type(field, column.type, [](auto&& arg) {
             if constexpr (requires { std::cout << arg; })
               std::cout << arg;
             else
               std::cout << arg.data();
           });
+          std::cout << '#';
+          field += size_of_type(column.type);
         }
         std::cout << '\n';
         bitmap[record_idx / 8] &= ~(1 << record_idx % 8);
