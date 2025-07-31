@@ -296,7 +296,6 @@ TableHeaderInfo read_table_header(std::string_view table_name) {
     throw std::exception();
 
   auto header_data = buffer_manager.load_sector(header_sector);
-  buffer_manager.pin(header_sector);
   auto records_address = reinterpret_cast<const Address&>(*header_data);
   header_data += sizeof(Address);
   int columns_size = reinterpret_cast<const int&>(*header_data);
@@ -384,7 +383,6 @@ void select_all(std::string_view table_name) {
                   std::cout << '\n';
                 });
   auto header_sector = search_table(table_name);
-  buffer_manager.unpin(header_sector);
 }
 
 void select_all_where(std::string_view table_name,
@@ -428,7 +426,6 @@ void select_all_where(std::string_view table_name,
         std::cout << '\n';
       });
   auto header_sector = search_table(table_name);
-  buffer_manager.unpin(header_sector);
 }
 
 void delete_where(std::string_view table_name, std::string_view expression) {
@@ -469,8 +466,6 @@ void delete_where(std::string_view table_name, std::string_view expression) {
         std::cout << '\n';
         bitmap[record_idx / 8] &= ~(1 << record_idx % 8);
       });
-  auto header_sector = search_table(table_name);
-  buffer_manager.unpin(header_sector);
 }
 
 void disk_info() {
