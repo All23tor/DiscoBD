@@ -2,6 +2,8 @@
 #include <fstream>
 #include <print>
 
+static constexpr bool log_info = false;
+
 Frame::Frame(int frame_id) {
   std::ostringstream oss;
   for (int sector = 0; sector < global.block_size; sector++) {
@@ -43,29 +45,42 @@ BufferManager::load_sector(Address sector_address) {
   int block_id = sector_address.address / global.block_size;
   if (auto it = pool.find(block_id); it != pool.end()) {
     hits++;
+    if constexpr (log_info)
+      std::println("Updating {}", block_id);
     mru.erase(std::find(mru.begin(), mru.end(), block_id));
     mru.push_front(block_id);
     auto res = it->second.data<Readonly>() +
                global.bytes * (sector_address.address % global.block_size);
+    if constexpr (log_info)
+      print();
     return res;
   }
 
   if (pool.size() < capacity) {
+    if constexpr (log_info)
+      std::println("Adding {}", block_id);
     mru.push_front(block_id);
     auto [it, _] = pool.insert({block_id, Frame(block_id)});
     auto res = it->second.data<Readonly>() +
                global.bytes * (sector_address.address % global.block_size);
+    if constexpr (log_info)
+      print();
     return res;
   }
 
   auto mru_it = mru.begin();
-  while (mru_it != mru.end() && pool.at(*mru_it).pin_count != 0)
+  while (mru_it != mru.end() && pool.at(*mru_it).pin_count != 0) {
+    if constexpr (log_info)
+      std::println("Ignoring {}", *mru_it);
     mru_it++;
+  }
 
   if (mru_it == mru.end())
     throw std::runtime_error("Everything is pinned!");
 
   int mru_id = *mru_it;
+  if constexpr (log_info)
+    std::println("Erasing {}", mru_id);
   const Frame& mru_frame = pool.at(mru_id);
   if (mru_frame.dirty_bit) {
     for (int sector = 0; sector < global.block_size; sector++) {
@@ -79,21 +94,24 @@ BufferManager::load_sector(Address sector_address) {
   pool.erase(mru_id);
 
   mru.push_front(block_id);
+  if constexpr (log_info)
+    std::println("Replacing {}", block_id);
   auto [it, _] = pool.insert({block_id, Frame(block_id)});
   auto res = it->second.data<Readonly>() +
              global.bytes * (sector_address.address % global.block_size);
+  if constexpr (log_info)
+    print();
   return res;
 }
 template const char* BufferManager::load_sector<true>(Address sector_address);
 template char* BufferManager::load_sector<false>(Address sector_address);
 
 void BufferManager::print() const {
-  std::println("ID\tL/W\tDIRTY\tPINS\tMRU\t\n");
+  std::println("ID\tL/W\tDIRTY\tPINS\tMRU");
   for (int idx{}; int frame_id : mru) {
     const auto& frame = pool.at(frame_id);
-    std::println("{}\t{}\t{}\t{}\t{}\t{}\t", frame_id,
-                 frame.dirty_bit ? 'W' : 'L', frame_id, frame.dirty_bit,
-                 frame.pin_count, idx++);
+    std::println("{}\t{}\t{}\t{}\t{}", frame_id, frame.dirty_bit ? 'W' : 'L',
+                 frame.dirty_bit, frame.pin_count, idx++);
   }
   std::println("Total access {}\tHits {}", total_access, hits);
   std::println("Hit rate {}%", static_cast<float>(hits) * 100 / total_access);
@@ -101,15 +119,23 @@ void BufferManager::print() const {
 
 void BufferManager::pin(Address sector_address) {
   int block_id = sector_address.address / global.block_size;
+  if constexpr (log_info)
+    std::println("Pinning {}", block_id);
   if (auto it = pool.find(block_id); it != pool.end()) {
     it->second.pin_count++;
   }
+  if constexpr (log_info)
+    print();
 }
 
 void BufferManager::unpin(Address sector_address) {
   int block_id = sector_address.address / global.block_size;
+  if constexpr (log_info)
+    std::println("Unpinning {}", block_id);
   if (auto it = pool.find(block_id); it != pool.end()) {
     if (it->second.pin_count > 0)
       it->second.pin_count--;
   }
+  if constexpr (log_info)
+    print();
 }
