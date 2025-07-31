@@ -1,11 +1,16 @@
 #include "Table.hpp"
+#include "BufferManager.hpp"
 #include "Interpreter.hpp"
+#include "Type.hpp"
+#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <type_traits>
 #include <vector>
 
 namespace {
+BufferManager buffer_manager;
 template <class T>
 auto& pun_cast(T& t) {
   return reinterpret_cast<std::array<char, sizeof(T)>&>(t);
@@ -39,8 +44,6 @@ std::istream& operator>>(std::istream& is, Db::Type& type) {
   return is;
 }
 
-static constexpr Address NullAddress = {-1};
-
 std::pair<std::vector<Db::Column>, std::size_t>
 read_columns(std::stringstream schema) {
   std::size_t record_size = 0;
@@ -64,7 +67,83 @@ read_columns(std::stringstream schema) {
   return {columns, record_size};
 }
 
-Address request_empty_sector(BufferManager& buffer_manager) {
+template <bool Readonly = true>
+struct SectorHandle {
+  Address address;
+
+  explicit SectorHandle(Address a = NullAddress) : address(a) {
+    buffer_manager.load_sector<Readonly>(address);
+    buffer_manager.pin(address);
+  }
+
+  SectorHandle(const SectorHandle&) = delete;
+  SectorHandle(SectorHandle&& other) : address(other.address) {
+    other.address = NullAddress;
+  }
+  SectorHandle& operator=(SectorHandle&& other) {
+    if (this != &other) {
+      this->~SectorHandle();
+      new (this) SectorHandle(std::move(other));
+    }
+    return *this;
+  }
+
+  SectorHandle(SectorHandle<false>&& other)
+  requires Readonly
+      : address(other.address) {
+    other.address = NullAddress;
+  }
+
+  ~SectorHandle() {
+    if (address != NullAddress)
+      buffer_manager.unpin(address);
+  }
+
+  auto as_tables() {
+    return reinterpret_cast<std::conditional_t<Readonly, const Table*, Table*>>(
+        buffer_manager.load_sector<Readonly>(address));
+  }
+
+  Address get() {
+    return address;
+  }
+
+  auto&& next_sector() {
+    return *reinterpret_cast<
+        std::conditional_t<Readonly, const Address*, Address*>>(
+        buffer_manager.load_sector<Readonly>(address));
+  }
+
+  auto&& column_size() {
+    return *reinterpret_cast<std::conditional_t<Readonly, const int*, int*>>(
+        buffer_manager.load_sector<Readonly>(address) + sizeof(Address));
+  }
+
+  auto&& record_count() {
+    return *reinterpret_cast<std::conditional_t<Readonly, const int*, int*>>(
+        buffer_manager.load_sector<Readonly>(address) + sizeof(Address));
+  }
+
+  auto columns() {
+    return reinterpret_cast<
+        std::conditional_t<Readonly, const Db::Column*, Db::Column*>>(
+        buffer_manager.load_sector<Readonly>(address) + sizeof(Address) +
+        sizeof(int));
+  }
+
+  auto bitmap() {
+    return buffer_manager.load_sector<Readonly>(address) + sizeof(Address) +
+           sizeof(int);
+  }
+
+  auto record_data(int bitmap_size, int record_idx, int record_size) {
+    return buffer_manager.load_sector<Readonly>(address) + sizeof(Address) +
+           sizeof(int) + bitmap_size + record_idx * record_size;
+  }
+};
+
+template <bool Readonly = true>
+auto new_handle() {
   int total_sectors = global.plates * 2 * global.tracks * global.sectors;
   int total_blocks = total_sectors / global.block_size;
   for (int block_idx = 0; block_idx < total_blocks; block_idx++) {
@@ -73,16 +152,15 @@ Address request_empty_sector(BufferManager& buffer_manager) {
       auto data = buffer_manager.load_sector(address);
       auto next_address = reinterpret_cast<const Address&>(*data);
       if (next_address.address == 0)
-        return address;
+        return SectorHandle<Readonly>{address};
     }
   }
   throw std::bad_alloc();
 }
 
-Address search_table(std::string_view table_name,
-                     BufferManager& buffer_manager) {
-  auto first_data = buffer_manager.load_sector({0});
-  auto tables = reinterpret_cast<const Table*>(first_data);
+Address search_table(std::string_view table_name) {
+  auto first_sector = SectorHandle({0});
+  auto tables = first_sector.as_tables();
   int table_idx = 0;
 
   while (tables[table_idx].name[0] != '\0') {
@@ -101,61 +179,43 @@ Address search_table(std::string_view table_name,
   return NullAddress;
 }
 
-Address* write_table_header(std::string_view table_name,
-                            const std::vector<Db::Column>& columns,
-                            BufferManager& buffer_manager) {
-  auto first_data = buffer_manager.load_sector<false>({0});
-  auto tables = reinterpret_cast<Table*>(first_data);
+SectorHandle<false> write_table_header(std::string_view table_name,
+                                       const std::vector<Db::Column>& columns) {
+  auto first_sector = SectorHandle<false>({0});
+  auto tables = first_sector.as_tables();
   int table_idx = 0;
-
-  while (tables[table_idx].name[0] != '\0')
+  while (tables[table_idx].name.front() != '\0')
     table_idx++;
+  auto&& table = tables[table_idx];
+  std::strncpy(table.name.data(), table_name.data(), table.name.size());
 
-  auto& table = tables[table_idx];
-  for (int i = 0; i < table_name.size(); i++)
-    table.name[i] = table_name[i];
-  for (int i = table_name.size(); i < table.name.size(); i++)
-    table.name[i] = '\0';
+  auto header_sector = new_handle<false>();
+  table.sector = header_sector.get();
 
-  auto header_sector = request_empty_sector(buffer_manager);
-  auto header_data = buffer_manager.load_sector<false>(header_sector);
-  buffer_manager.pin(header_sector);
-  table.sector = header_sector;
-
-  auto records_start = reinterpret_cast<Address*>(header_data);
-  *records_start = NullAddress;
-  header_data += sizeof(Address);
-
-  int column_size = columns.size();
-  for (char c : pun_cast(column_size))
-    *(header_data++) = c;
-
+  header_sector.next_sector() = NullAddress;
+  header_sector.column_size() = columns.size();
+  auto sector_columns = header_sector.columns();
   for (auto& column : columns)
-    for (char c : pun_cast(column))
-      *(header_data++) = c;
+    *(sector_columns++) = column;
 
-  return records_start;
+  return header_sector;
 }
 
-void write_sector_header(Address*& next_sector, char*& record_data,
-                         int*& record_count, char*& bitmap, int bitmap_size,
-                         BufferManager& buffer_manager) {
-  *next_sector = request_empty_sector(buffer_manager);
-  record_data = buffer_manager.load_sector<false>(*next_sector);
-  next_sector = reinterpret_cast<Address*>(record_data);
-  *next_sector = NullAddress;
-  record_data += sizeof(Address);
-  record_count = reinterpret_cast<int*>(record_data);
-  *record_count = 0;
-  record_data += sizeof(int);
-  bitmap = record_data;
+void write_sector_header(SectorHandle<false>& sector, int bitmap_size) {
+  auto next_sector = new_handle<false>();
+  sector.next_sector() = next_sector.get();
+
+  sector = std::move(next_sector);
+  sector.next_sector() = NullAddress;
+  sector.record_count() = 0;
+  auto bitmap = sector.bitmap();
   while (bitmap_size--) {
-    *record_data = 0;
-    record_data++;
+    *bitmap = 0;
+    bitmap++;
   }
 }
 
-void write_record(char*& record_data, std::stringstream ss,
+void write_record(char* record_data, std::stringstream ss,
                   std::span<const Db::Column> columns) {
   for (const auto& [name, type] : columns) {
     std::string field;
@@ -202,23 +262,24 @@ void write_record(char*& record_data, std::stringstream ss,
   }
 }
 
-void write_table_data(std::ifstream& file, Address* next_sector,
-                      std::span<const Db::Column> columns,
-                      int records_per_sector, BufferManager& buffer_manager) {
+void write_table_data(std::ifstream& file, SectorHandle<> header_sector,
+                      int records_per_sector, int record_size) {
   int bitmap_size = (records_per_sector + 7) / 8;
-  char* record_data;
-  int* record_count;
-  char* bitmap;
-  write_sector_header(next_sector, record_data, record_count, bitmap,
-                      bitmap_size, buffer_manager);
+  std::span<const Db::Column> columns(header_sector.columns(),
+                                      header_sector.column_size());
 
-  for (std::string line; std::getline(file, line); (*record_count)++) {
-    if (*record_count == records_per_sector)
-      write_sector_header(next_sector, record_data, record_count, bitmap,
-                          bitmap_size, buffer_manager);
+  SectorHandle<false> sector(header_sector.get());
+  write_sector_header(sector, bitmap_size);
 
-    write_record(record_data, std::stringstream(std::move(line)), columns);
-    bitmap[*record_count / 8] |= 1 << (*record_count % 8);
+  for (std::string line; std::getline(file, line); sector.record_count()++) {
+    if (sector.record_count() == records_per_sector)
+      write_sector_header(sector, bitmap_size);
+
+    write_record(
+        sector.record_data(bitmap_size, sector.record_count(), record_size),
+        std::stringstream(std::move(line)), columns);
+    sector.bitmap()[sector.record_count() / 8] |=
+        1 << (sector.record_count() % 8);
   }
 }
 
@@ -229,9 +290,8 @@ struct TableHeaderInfo {
   int bitmap_size;
 };
 
-TableHeaderInfo read_table_header(std::string_view table_name,
-                                  BufferManager& buffer_manager) {
-  auto header_sector = search_table(table_name, buffer_manager);
+TableHeaderInfo read_table_header(std::string_view table_name) {
+  auto header_sector = search_table(table_name);
   if (header_sector == NullAddress)
     throw std::exception();
 
@@ -258,76 +318,51 @@ TableHeaderInfo read_table_header(std::string_view table_name,
 
 template <bool Readonly = true, class Visitor>
 void visit_records(Address records_address, int bitmap_size, int record_size,
-                   BufferManager& buffer_manager, Visitor&& v) {
+                   Visitor&& v) {
   while (records_address != NullAddress) {
-    auto records_data = buffer_manager.load_sector<Readonly>(records_address);
-    auto next_address = reinterpret_cast<const Address&>(*records_data);
-    records_data += sizeof(Address);
-    auto record_count = reinterpret_cast<const int&>(*records_data);
-    records_data += sizeof(int);
-    auto bitmap = records_data;
-    records_data += bitmap_size;
+    auto sector = SectorHandle<Readonly>({records_address});
+    auto record_count = sector.record_count();
 
     for (auto record_idx = 0uz; record_idx < record_count; record_idx++) {
-      v(records_data, record_idx, bitmap);
-      records_data += record_size;
+      auto data = sector.record_data(bitmap_size, record_idx, record_size);
+      v(data, record_idx, sector.bitmap());
     }
 
-    records_address = next_address;
+    records_address = sector.next_sector();
   }
 }
 } // namespace
 
-void load_csv(std::string_view csv_name, BufferManager& buffer_manager) {
+void load_csv(std::string_view csv_name) {
   std::ifstream file(std::string{csv_name} + ".csv");
-  const auto header_sector = search_table(csv_name, buffer_manager);
+  const auto header_sector = search_table(csv_name);
 
-  if (header_sector != NullAddress) {
-    auto header_info = read_table_header(csv_name, buffer_manager);
-    file.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-    int records_per_sector = 8 *
-                             (global.bytes - sizeof(Address) - sizeof(int)) /
-                             (8 * header_info.record_size + 1);
+  if (header_sector != NullAddress)
+    return;
 
-    auto header_data = buffer_manager.load_sector<false>(header_sector);
-    Address* next_address = reinterpret_cast<Address*>(header_data);
-    auto records_address = *next_address;
-    while (records_address != NullAddress) {
-      auto records_data = buffer_manager.load_sector<false>(records_address);
-      next_address = reinterpret_cast<Address*>(records_data);
-      records_address = *next_address;
-    }
+  std::string schema_str;
+  std::getline(file, schema_str);
+  auto [columns, record_size] =
+      read_columns(std::stringstream(std::move(schema_str)));
+  int records_per_sector = 8 * (global.bytes - sizeof(Address) - sizeof(int)) /
+                           (8 * record_size + 1);
 
-    write_table_data(file, next_address, header_info.columns,
-                     records_per_sector, buffer_manager);
-  } else {
-    std::string schema_str;
-    std::getline(file, schema_str);
-    auto [columns, record_size] =
-        read_columns(std::stringstream(std::move(schema_str)));
-    int records_per_sector = 8 *
-                             (global.bytes - sizeof(Address) - sizeof(int)) /
-                             (8 * record_size + 1);
-
-    auto records_start = write_table_header(csv_name, columns, buffer_manager);
-    write_table_data(file, records_start, columns, records_per_sector,
-                     buffer_manager);
-  }
-
-  buffer_manager.unpin(header_sector);
+  auto records_start = write_table_header(csv_name, columns);
+  write_table_data(file, std::move(records_start), records_per_sector,
+                   record_size);
 }
 
-void select_all(std::string_view table_name, BufferManager& buffer_manager) {
+void select_all(std::string_view table_name) {
   TableHeaderInfo header_info;
   try {
-    header_info = read_table_header(table_name, buffer_manager);
+    header_info = read_table_header(table_name);
   } catch (...) {
     std::cerr << "Tabla " << table_name << " no existe\n";
     return;
   }
 
   visit_records(header_info.records_address, header_info.bitmap_size,
-                header_info.record_size, buffer_manager,
+                header_info.record_size,
                 [columns = header_info.columns](const char* records_data,
                                                 std::size_t record_idx,
                                                 const char* bitmap) {
@@ -348,15 +383,15 @@ void select_all(std::string_view table_name, BufferManager& buffer_manager) {
                   }
                   std::cout << '\n';
                 });
-  auto header_sector = search_table(table_name, buffer_manager);
+  auto header_sector = search_table(table_name);
   buffer_manager.unpin(header_sector);
 }
 
-void select_all_where(std::string_view table_name, std::string_view expression,
-                      BufferManager& buffer_manager) {
+void select_all_where(std::string_view table_name,
+                      std::string_view expression) {
   TableHeaderInfo header_info;
   try {
-    header_info = read_table_header(table_name, buffer_manager);
+    header_info = read_table_header(table_name);
   } catch (...) {
     std::cerr << "Tabla " << table_name << " no existe\n";
     return;
@@ -366,7 +401,7 @@ void select_all_where(std::string_view table_name, std::string_view expression,
 
   visit_records(
       header_info.records_address, header_info.bitmap_size,
-      header_info.record_size, buffer_manager,
+      header_info.record_size,
       [columns = header_info.columns, &tree](const char* records_data,
                                              std::size_t record_idx,
                                              const char* bitmap) {
@@ -392,15 +427,14 @@ void select_all_where(std::string_view table_name, std::string_view expression,
         }
         std::cout << '\n';
       });
-  auto header_sector = search_table(table_name, buffer_manager);
+  auto header_sector = search_table(table_name);
   buffer_manager.unpin(header_sector);
 }
 
-void delete_where(std::string_view table_name, std::string_view expression,
-                  BufferManager& buffer_manager) {
+void delete_where(std::string_view table_name, std::string_view expression) {
   TableHeaderInfo header_info;
   try {
-    header_info = read_table_header(table_name, buffer_manager);
+    header_info = read_table_header(table_name);
   } catch (...) {
     std::cerr << "Tabla " << table_name << " no existe\n";
     return;
@@ -410,7 +444,7 @@ void delete_where(std::string_view table_name, std::string_view expression,
 
   visit_records<false>(
       header_info.records_address, header_info.bitmap_size,
-      header_info.record_size, buffer_manager,
+      header_info.record_size,
       [&tree, columns = header_info.columns](
           char* records_data, std::size_t record_idx, char* bitmap) {
         bool bit = (bitmap[record_idx / 8] >> (record_idx % 8)) & 1;
@@ -435,11 +469,11 @@ void delete_where(std::string_view table_name, std::string_view expression,
         std::cout << '\n';
         bitmap[record_idx / 8] &= ~(1 << record_idx % 8);
       });
-  auto header_sector = search_table(table_name, buffer_manager);
+  auto header_sector = search_table(table_name);
   buffer_manager.unpin(header_sector);
 }
 
-void disk_info(BufferManager& buffer_manager) {
+void disk_info() {
   auto total_bytes =
       global.plates * 2 * global.tracks * global.sectors * global.bytes;
   std::cout << "Capacidad total del disco: " << total_bytes << " bytes \n";

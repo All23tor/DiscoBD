@@ -20,6 +20,7 @@ struct Address {
   bool operator==(const Address&) const = default;
   fs::path to_path() const;
 };
+static constexpr Address NullAddress = {-1};
 
 void make_disk();
 

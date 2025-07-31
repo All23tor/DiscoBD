@@ -4,26 +4,24 @@
 #include <sstream>
 
 void handle_inputs() {
-  BufferManager buffer_manager;
-
-  std::cout << "Información del disco:\n";
-  std::cout << "Número de platos: " << global.plates << '\n';
-  std::cout << "Número de pistas por plato: " << global.tracks << '\n';
-  std::cout << "Número de sectores por pista: " << global.sectors << '\n';
-  std::cout << "Número de bytes por sector: " << global.bytes << '\n';
-  std::cout << "Número de sectores por bloque: " << global.block_size << '\n'
+  std::clog << "Información del disco:\n";
+  std::clog << "Número de platos: " << global.plates << '\n';
+  std::clog << "Número de pistas por plato: " << global.tracks << '\n';
+  std::clog << "Número de sectores por pista: " << global.sectors << '\n';
+  std::clog << "Número de bytes por sector: " << global.bytes << '\n';
+  std::clog << "Número de sectores por bloque: " << global.block_size << '\n'
             << '\n';
 
   std::string line;
-  while (std::cout << "  > ", std::getline(std::cin, line)) {
+  while (std::clog << "  > ", std::getline(std::cin, line)) {
     std::stringstream ss{std::move(line)};
     std::string word;
     ss >> word;
     if (word == "LOAD") {
       std::string name;
       ss >> name;
-      load_csv(name, buffer_manager);
-      std::cout << "\tSe cargó la tabla " << name << " exitosamente\n";
+      load_csv(name);
+      std::clog << "\tSe cargó la tabla " << name << " exitosamente\n";
     } else if (word == "SELECT") {
       std::string fields;
       ss >> fields;
@@ -39,9 +37,9 @@ void handle_inputs() {
           if (WHERE == "WHERE") {
             std::string clause;
             std::getline(ss, clause, '\n');
-            select_all_where(table_name, clause, buffer_manager);
+            select_all_where(table_name, clause);
           } else {
-            select_all(table_name, buffer_manager);
+            select_all(table_name);
           }
         }
       }
@@ -57,32 +55,13 @@ void handle_inputs() {
         if (WHERE == "WHERE") {
           std::string clause;
           std::getline(ss, clause, '\n');
-          delete_where(table_name, clause, buffer_manager);
+          delete_where(table_name, clause);
         }
       }
-    } else if (word == "BUFFER") {
-      buffer_manager.print();
-    } else if (word == "REQUEST") {
-      int page_idx;
-      ss >> page_idx;
-      char rw;
-      ss >> rw;
-      if (rw == 'W')
-        buffer_manager.load_sector<false>({page_idx * global.block_size});
-      else if (rw == 'L')
-        buffer_manager.load_sector({page_idx * global.block_size});
-    } else if (word == "PIN") {
-      int page_idx;
-      ss >> page_idx;
-      buffer_manager.pin({page_idx * global.block_size});
-    } else if (word == "UNPIN") {
-      int page_idx;
-      ss >> page_idx;
-      buffer_manager.unpin({page_idx * global.block_size});
     } else if (word == "INFO")
-      disk_info(buffer_manager);
+      disk_info();
   }
-  std::cout << std::endl;
+  std::clog << std::endl;
 }
 
 int main() {
